@@ -80,6 +80,8 @@ def chat(session_id: str, user_message: str) -> dict:
             "from_faq": bool,       # 是否来自 FAQ 快速回复
         }
     """
+    start_time = time.time()
+
     # 0. FAQ 快速匹配（秒回，不走 LLM）
     faq_result = match_faq(user_message)
     if faq_result:
@@ -87,6 +89,7 @@ def chat(session_id: str, user_message: str) -> dict:
         history = _get_session_msgs(session_id)
         history.append({"role": "user", "content": user_message, "ts": now})
         history.append({"role": "assistant", "content": faq_result["reply"], "ts": now})
+        elapsed_ms = int((now - start_time) * 1000)
         return {
             "reply": faq_result["reply"],
             "need_human": False,
@@ -94,6 +97,7 @@ def chat(session_id: str, user_message: str) -> dict:
             "confidence": 1.0,
             "suggestions": faq_result.get("suggestions", []),
             "from_faq": True,
+            "elapsed_ms": elapsed_ms,
         }
 
     # 1. RAG 检索
@@ -167,6 +171,9 @@ def chat(session_id: str, user_message: str) -> dict:
     if len(history) > max_msgs + 10:
         _sessions[session_id]["msgs"] = history[-max_msgs:]
 
+    elapsed_ms = int((time.time() - start_time) * 1000)
+    logger.info(f"LLM 回复 | session={session_id[:12]} | {elapsed_ms}ms | confidence={avg_score:.2f}")
+
     return {
         "reply": reply,
         "need_human": need_human,
@@ -174,6 +181,7 @@ def chat(session_id: str, user_message: str) -> dict:
         "confidence": round(avg_score, 2),
         "suggestions": suggestions,
         "from_faq": False,
+        "elapsed_ms": elapsed_ms,
     }
 
 

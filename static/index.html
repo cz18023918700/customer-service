@@ -143,6 +143,7 @@ function addMessage(role, content, meta) {
     if (role === 'assistant' && meta) {
         const parts = [];
         if (meta.from_faq) parts.push('<span class="faq-tag">秒回</span>');
+        else if (meta.elapsed_ms) parts.push(`<span class="meta-text">${meta.elapsed_ms}ms</span>`);
         if (meta.need_human) parts.push('<span class="meta-text" style="color:#e74c3c">⚠️ 已通知人工客服</span>');
 
         footerHtml = `<div class="msg-footer">
@@ -225,6 +226,7 @@ async function sendMsg() {
             need_human: data.need_human,
             confidence: data.confidence,
             from_faq: data.from_faq,
+            elapsed_ms: data.elapsed_ms,
         });
         updateSuggestions(data.suggestions);
     } catch (e) {

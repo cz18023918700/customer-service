@@ -28,6 +28,7 @@ from models.db import (
     init_db, save_message, get_conversation_stats, get_recent_conversations,
     get_conversation_messages, get_hot_questions, get_human_transfer_list,
     save_feedback, get_feedback_stats, export_messages_csv, get_daily_trend,
+    save_faq_miss, get_faq_misses, search_conversations, get_response_time_stats,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -134,6 +135,12 @@ async def web_chat(request: Request):
     # 对话引擎处理
     result = chat(session_id, user_message)
 
+    elapsed_ms = result.get("elapsed_ms", 0)
+
+    # FAQ 未命中记录（走了 LLM 说明 FAQ 没接住）
+    if not result.get("from_faq"):
+        save_faq_miss(user_message)
+
     # 保存 AI 回复
     msg_id = save_message(
         session_id, "assistant", result["reply"],
@@ -141,6 +148,7 @@ async def web_chat(request: Request):
         need_human=result["need_human"],
         sources=",".join(result["sources"]),
         channel="web",
+        elapsed_ms=elapsed_ms,
     )
 
     return {
@@ -152,6 +160,7 @@ async def web_chat(request: Request):
         "sources": result["sources"],
         "suggestions": result.get("suggestions", []),
         "from_faq": result.get("from_faq", False),
+        "elapsed_ms": elapsed_ms,
     }
 
 
@@ -247,6 +256,7 @@ async def api_stats():
     """对话统计（含满意度）"""
     stats = get_conversation_stats()
     stats["feedback"] = get_feedback_stats()
+    stats["response_time"] = get_response_time_stats()
     return stats
 
 
@@ -273,6 +283,26 @@ async def api_hot_questions(limit: int = Query(10)):
 async def api_human_transfers(limit: int = Query(20)):
     """需要人工介入的对话"""
     return get_human_transfer_list(limit)
+
+
+@app.get("/api/faq-misses", dependencies=[Depends(verify_admin)])
+async def api_faq_misses(limit: int = Query(20)):
+    """FAQ 未命中的高频问题（发现新规则机会）"""
+    return get_faq_misses(limit)
+
+
+@app.get("/api/search", dependencies=[Depends(verify_admin)])
+async def api_search(q: str = Query(""), limit: int = Query(20)):
+    """搜索对话"""
+    if not q.strip():
+        return []
+    return search_conversations(q.strip(), limit)
+
+
+@app.get("/api/response-time", dependencies=[Depends(verify_admin)])
+async def api_response_time():
+    """响应时间统计"""
+    return get_response_time_stats()
 
 
 @app.get("/api/export-csv", dependencies=[Depends(verify_admin)])

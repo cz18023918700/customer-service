@@ -122,6 +122,8 @@ tr:hover td { background: #fafbfc; }
         <div class="nav-item" onclick="showPanel('conversations')">💬 对话记录</div>
         <div class="nav-item" onclick="showPanel('human')">🔔 转人工记录</div>
         <div class="nav-item" onclick="showPanel('hotq')">🔥 热门问题</div>
+        <div class="nav-item" onclick="showPanel('faqmiss')">🎯 FAQ未命中</div>
+        <div class="nav-item" onclick="showPanel('search')">🔍 搜索</div>
         <div class="nav-item" onclick="showPanel('knowledge')">📚 知识库管理</div>
     </div>
 
@@ -171,6 +173,28 @@ tr:hover td { background: #fafbfc; }
             </div>
         </div>
 
+        <!-- FAQ未命中 -->
+        <div id="panel-faqmiss" class="panel">
+            <div class="card">
+                <h3>FAQ 未命中的高频问题 <span style="font-size:11px;color:#999">（这些问题走了LLM，考虑新增FAQ规则）</span></h3>
+                <table><thead><tr><th>#</th><th>问题</th><th>次数</th></tr></thead>
+                <tbody id="faqmissTable"></tbody></table>
+            </div>
+        </div>
+
+        <!-- 搜索 -->
+        <div id="panel-search" class="panel">
+            <div class="card">
+                <h3>搜索对话</h3>
+                <div style="display:flex;gap:10px;margin-bottom:14px">
+                    <input type="text" id="searchInput" placeholder="输入关键词搜索..." style="flex:1;border:1px solid #ddd;border-radius:6px;padding:8px 12px;font-size:13px;outline:none" onkeydown="if(event.key==='Enter')doSearch()">
+                    <button class="btn btn-primary" onclick="doSearch()">搜索</button>
+                </div>
+                <table><thead><tr><th>会话</th><th>渠道</th><th>匹配内容</th><th>时间</th></tr></thead>
+                <tbody id="searchTable"></tbody></table>
+            </div>
+        </div>
+
         <!-- 知识库管理 -->
         <div id="panel-knowledge" class="panel">
             <div class="card">
@@ -198,6 +222,7 @@ function showPanel(name) {
     if (name === 'conversations') loadConversations();
     if (name === 'human') loadHumanTransfers();
     if (name === 'hotq') loadHotQuestions();
+    if (name === 'faqmiss') loadFaqMisses();
     if (name === 'knowledge') loadKBList();
 }
 
@@ -234,6 +259,7 @@ async function loadDashboard() {
         <div class="stat-card"><div class="label">转人工次数</div><div class="value">${stats.human_transfers}</div></div>
         <div class="stat-card"><div class="label">满意度</div><div class="value">${fb.satisfaction_rate || 0}%</div><div class="sub">👍${fb.positive||0} 👎${fb.negative||0}</div></div>
         <div class="stat-card"><div class="label">FAQ秒回率</div><div class="value">${faqRate}%</div><div class="sub">FAQ ${stats.faq_replies||0} / LLM ${stats.llm_replies||0}</div></div>
+        <div class="stat-card"><div class="label">平均响应</div><div class="value">${stats.response_time ? stats.response_time.avg_ms : 0}ms</div><div class="sub">最快 ${stats.response_time?stats.response_time.min_ms:0}ms</div></div>
         <div class="stat-card"><div class="label">导出数据</div><div class="value" style="font-size:14px"><a href="/api/export-csv" class="btn btn-primary" style="text-decoration:none;color:white">下载 CSV</a></div></div>
     `;
     let html = '';
@@ -304,6 +330,31 @@ async function loadHotQuestions() {
         html += `<tr><td>${i+1}</td><td>${truncate(q.content, 60)}</td><td>${q.cnt}</td></tr>`;
     });
     document.getElementById('hotqTable').innerHTML = html || '<tr><td colspan="3" class="empty">暂无数据</td></tr>';
+}
+
+async function loadFaqMisses() {
+    const list = await fetch('/api/faq-misses').then(r => r.json());
+    let html = '';
+    list.forEach((q, i) => {
+        html += `<tr><td>${i+1}</td><td>${truncate(q.question, 60)}</td><td>${q.cnt}</td></tr>`;
+    });
+    document.getElementById('faqmissTable').innerHTML = html || '<tr><td colspan="3" class="empty">暂无数据（说明FAQ覆盖率很好！）</td></tr>';
+}
+
+async function doSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) return;
+    const list = await fetch('/api/search?q=' + encodeURIComponent(q)).then(r => r.json());
+    let html = '';
+    for (const r of list) {
+        html += `<tr>
+            <td class="clickable" onclick="viewChat('${r.session_id}')">${truncate(r.session_id, 20)}</td>
+            <td><span class="tag tag-${r.channel}">${r.channel}</span></td>
+            <td>${truncate(r.matched_content, 50)}</td>
+            <td>${fmtTime(r.created_at)}</td>
+        </tr>`;
+    }
+    document.getElementById('searchTable').innerHTML = html || '<tr><td colspan="4" class="empty">未找到匹配的对话</td></tr>';
 }
 
 let currentKBFile = '';

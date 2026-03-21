@@ -59,17 +59,29 @@ def init_db() -> None:
                 created_at REAL NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS faq_misses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id);
             CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
         """)
+        # 安全加列（已有表不报错）
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN elapsed_ms INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
         conn.commit()
         logger.info("数据库初始化完成")
 
 
 def save_message(session_id: str, role: str, content: str,
                  confidence: float = 0, need_human: bool = False,
-                 sources: str = "", channel: str = "web") -> int:
+                 sources: str = "", channel: str = "web",
+                 elapsed_ms: int = 0) -> int:
     """保存消息记录"""
     now = time.time()
     with get_db() as conn:
@@ -89,8 +101,8 @@ def save_message(session_id: str, role: str, content: str,
             conv_id = cursor.lastrowid
 
         cursor = conn.execute(
-            "INSERT INTO messages (conversation_id, session_id, role, content, confidence, need_human, sources, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (conv_id, session_id, role, content, confidence, int(need_human), sources, now)
+            "INSERT INTO messages (conversation_id, session_id, role, content, confidence, need_human, sources, created_at, elapsed_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (conv_id, session_id, role, content, confidence, int(need_human), sources, now, elapsed_ms)
         )
         conn.commit()
         return cursor.lastrowid
@@ -278,3 +290,63 @@ def export_messages_csv() -> str:
         writer.writerow([r["session_id"], r["channel"], r["role"], r["content"],
                          r["confidence"], r["need_human"], r["sources"], ts])
     return output.getvalue()
+
+
+def save_faq_miss(question: str) -> None:
+    """记录 FAQ 未命中的问题"""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO faq_misses (question, created_at) VALUES (?, ?)",
+            (question, time.time())
+        )
+        conn.commit()
+
+
+def get_faq_misses(limit: int = 20) -> list[dict]:
+    """获取 FAQ 未命中的高频问题（用于发现需要新增的规则）"""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT question, COUNT(*) as cnt
+            FROM faq_misses
+            GROUP BY question
+            ORDER BY cnt DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def search_conversations(keyword: str, limit: int = 20) -> list[dict]:
+    """按关键词搜索对话"""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT c.session_id, c.channel, c.created_at, c.updated_at,
+                   (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as msg_count,
+                   m.content as matched_content
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.content LIKE ?
+            ORDER BY m.created_at DESC
+            LIMIT ?
+        """, (f"%{keyword}%", limit)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_response_time_stats() -> dict:
+    """获取响应时间统计"""
+    with get_db() as conn:
+        row = conn.execute("""
+            SELECT AVG(elapsed_ms) as avg_ms,
+                   MIN(elapsed_ms) as min_ms,
+                   MAX(elapsed_ms) as max_ms,
+                   COUNT(*) as total
+            FROM messages
+            WHERE role = 'assistant' AND elapsed_ms > 0
+        """).fetchone()
+        if row and row["total"] > 0:
+            return {
+                "avg_ms": round(row["avg_ms"], 0),
+                "min_ms": row["min_ms"],
+                "max_ms": row["max_ms"],
+                "total": row["total"],
+            }
+        return {"avg_ms": 0, "min_ms": 0, "max_ms": 0, "total": 0}
