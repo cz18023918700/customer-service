@@ -26,7 +26,7 @@ from knowledge.loader import load_knowledge_base
 from models.db import (
     init_db, save_message, get_conversation_stats, get_recent_conversations,
     get_conversation_messages, get_hot_questions, get_human_transfer_list,
-    save_feedback, get_feedback_stats,
+    save_feedback, get_feedback_stats, export_messages_csv,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -39,6 +39,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="静享时空 AI 客服", version="1.0.0")
+
+# ============ 限流器 ============
+_rate_limits: dict[str, list[float]] = {}  # {key: [timestamps]}
+RATE_LIMIT_MAX = 20  # 每分钟最多请求数
+RATE_LIMIT_WINDOW = 60  # 窗口秒数
+
+
+def check_rate_limit(key: str) -> bool:
+    """检查是否超限，返回 True 表示允许"""
+    now = time.time()
+    if key not in _rate_limits:
+        _rate_limits[key] = []
+
+    # 清理过期记录
+    _rate_limits[key] = [t for t in _rate_limits[key] if now - t < RATE_LIMIT_WINDOW]
+
+    if len(_rate_limits[key]) >= RATE_LIMIT_MAX:
+        return False
+
+    _rate_limits[key].append(now)
+    return True
 
 
 def verify_admin(request: Request) -> None:
@@ -100,6 +121,10 @@ async def web_chat(request: Request):
 
     if not user_message:
         return JSONResponse({"error": "消息不能为空"}, status_code=400)
+
+    # 限流检查
+    if not check_rate_limit(session_id):
+        return JSONResponse({"error": "请求太频繁，请稍后再试"}, status_code=429)
 
     # 保存用户消息
     save_message(session_id, "user", user_message, channel="web")
@@ -168,7 +193,8 @@ async def wecom_message(
     user_id = msg["from_user"]
     user_message = msg["content"]
 
-    logger.info(f"收到企微消息 | 用户: {user_id} | 内容: {user_message}")
+    masked_uid = user_id[:4] + "***" if len(user_id) > 4 else "***"
+    logger.info(f"收到企微消息 | 用户: {masked_uid} | 长度: {len(user_message)}")
 
     # 保存用户消息
     save_message(user_id, "user", user_message, channel="wecom")
@@ -244,6 +270,18 @@ async def api_hot_questions(limit: int = Query(10)):
 async def api_human_transfers(limit: int = Query(20)):
     """需要人工介入的对话"""
     return get_human_transfer_list(limit)
+
+
+@app.get("/api/export-csv", dependencies=[Depends(verify_admin)])
+async def api_export_csv():
+    """导出对话记录为 CSV"""
+    from fastapi.responses import Response
+    csv_data = export_messages_csv()
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=conversations.csv"},
+    )
 
 
 @app.post("/api/reload-kb", dependencies=[Depends(verify_admin)])

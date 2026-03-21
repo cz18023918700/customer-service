@@ -189,11 +189,16 @@ async function loadDashboard() {
         fetch('/api/stats').then(r => r.json()),
         fetch('/api/history?limit=10').then(r => r.json()),
     ]);
+    const fb = stats.feedback || {};
+    const totalReplies = (stats.faq_replies || 0) + (stats.llm_replies || 0);
+    const faqRate = totalReplies ? Math.round((stats.faq_replies || 0) / totalReplies * 100) : 0;
     document.getElementById('statsCards').innerHTML = `
         <div class="stat-card"><div class="label">总对话数</div><div class="value">${stats.total_conversations}</div><div class="sub">今日 +${stats.today_conversations}</div></div>
         <div class="stat-card"><div class="label">总消息数</div><div class="value">${stats.total_messages}</div><div class="sub">今日 +${stats.today_messages}</div></div>
         <div class="stat-card"><div class="label">转人工次数</div><div class="value">${stats.human_transfers}</div></div>
-        <div class="stat-card"><div class="label">AI解决率</div><div class="value">${stats.total_conversations ? Math.round((1 - stats.human_transfers / Math.max(stats.total_messages,1)) * 100) : 0}%</div></div>
+        <div class="stat-card"><div class="label">满意度</div><div class="value">${fb.satisfaction_rate || 0}%</div><div class="sub">👍${fb.positive||0} 👎${fb.negative||0}</div></div>
+        <div class="stat-card"><div class="label">FAQ秒回率</div><div class="value">${faqRate}%</div><div class="sub">FAQ ${stats.faq_replies||0} / LLM ${stats.llm_replies||0}</div></div>
+        <div class="stat-card"><div class="label">导出数据</div><div class="value" style="font-size:14px"><a href="/api/export-csv" class="btn btn-primary" style="text-decoration:none;color:white">下载 CSV</a></div></div>
     `;
     let html = '';
     for (const c of convs) {
