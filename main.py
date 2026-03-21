@@ -36,10 +36,23 @@ from models.db import (
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
 # 日志配置
+_log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+if not config.DEBUG:
+    # 生产模式：额外写文件，10MB 轮转，保留 5 个
+    from logging.handlers import RotatingFileHandler
+    log_dir = Path(__file__).parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    file_handler = RotatingFileHandler(
+        str(log_dir / "service.log"), maxBytes=10 * 1024 * 1024,
+        backupCount=5, encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    _log_handlers.append(file_handler)
+
 logging.basicConfig(
     level=logging.DEBUG if config.DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 
@@ -148,6 +161,53 @@ async def health():
         "timestamp": time.time(),
         "has_deepseek": bool(config.DEEPSEEK_API_KEY),
         "has_wecom": bool(config.WECOM_CORP_ID),
+    }
+
+
+@app.get("/status", dependencies=[Depends(verify_admin)])
+async def status():
+    """系统状态汇总（一页看全局）"""
+    import platform
+    from pathlib import Path as _Path
+
+    stats = get_conversation_stats()
+    fb = get_feedback_stats()
+    rt = get_response_time_stats()
+    db_path = _Path(__file__).parent / "customer_service.db"
+    db_size = db_path.stat().st_size / 1024 if db_path.exists() else 0
+
+    return {
+        "system": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "port": config.PORT,
+            "debug": config.DEBUG,
+            "has_deepseek": bool(config.DEEPSEEK_API_KEY),
+            "has_wecom": bool(config.WECOM_CORP_ID),
+            "has_admin_token": bool(config.ADMIN_TOKEN),
+        },
+        "conversations": {
+            "total": stats["total_conversations"],
+            "today": stats["today_conversations"],
+            "active": get_active_sessions_count(),
+            "pending_human": get_pending_human_count(),
+        },
+        "messages": {
+            "total": stats["total_messages"],
+            "today": stats["today_messages"],
+            "faq_replies": stats["faq_replies"],
+            "llm_replies": stats["llm_replies"],
+            "human_transfers": stats["human_transfers"],
+        },
+        "quality": {
+            "satisfaction_rate": fb["satisfaction_rate"],
+            "feedback_total": fb["total"],
+            "avg_response_ms": rt["avg_ms"],
+            "faq_rate": round(stats["faq_replies"] / max(stats["faq_replies"] + stats["llm_replies"], 1) * 100, 1),
+        },
+        "storage": {
+            "db_size_kb": round(db_size, 1),
+        },
     }
 
 

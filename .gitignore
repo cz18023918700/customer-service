@@ -8,3 +8,6 @@ chroma_db/
 *.egg-info/
 dist/
 build/
+logs/
+backups/
+data/
