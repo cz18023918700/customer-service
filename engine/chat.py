@@ -9,11 +9,11 @@ from openai import OpenAI
 from config import config
 from engine.prompt import build_system_prompt
 from knowledge.loader import query_knowledge
+from models.db import get_conversation_messages
 
 logger = logging.getLogger(__name__)
 
-# 会话历史（内存存储，后续可换 Redis/DB）
-# {session_id: [{"role": "user/assistant", "content": "...", "ts": ...}]}
+# 内存缓存（热会话），冷数据从 DB 加载
 _sessions: dict[str, list[dict]] = defaultdict(list)
 
 
@@ -53,8 +53,13 @@ def chat(session_id: str, user_message: str) -> dict:
     system_prompt = build_system_prompt(context)
     messages = [{"role": "system", "content": system_prompt}]
 
-    # 加入历史对话（最近 N 轮）
+    # 加入历史对话（内存优先，没有则从 DB 加载）
     history = _sessions[session_id]
+    if not history:
+        db_msgs = get_conversation_messages(session_id)
+        for m in db_msgs:
+            history.append({"role": m["role"], "content": m["content"], "ts": m["created_at"]})
+
     recent = history[-(config.MAX_HISTORY_TURNS * 2):]
     for h in recent:
         messages.append({"role": h["role"], "content": h["content"]})
@@ -131,5 +136,9 @@ def clear_session(session_id: str) -> None:
 
 
 def get_session_history(session_id: str) -> list[dict]:
-    """获取会话历史"""
-    return list(_sessions.get(session_id, []))
+    """获取会话历史（内存 + DB 兜底）"""
+    history = _sessions.get(session_id, [])
+    if history:
+        return list(history)
+    # 内存没有则从 DB 加载
+    return get_conversation_messages(session_id)

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>静享时空 · 客服管理后台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #2d3436; }
+
+.topbar {
+    background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
+    color: white; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center;
+}
+.topbar h1 { font-size: 17px; font-weight: 600; }
+.topbar a { color: #74b9ff; text-decoration: none; font-size: 13px; }
+
+.layout { display: flex; height: calc(100vh - 50px); }
+
+.sidebar {
+    width: 200px; background: #2d3436; color: #dfe6e9; flex-shrink: 0;
+    display: flex; flex-direction: column; padding-top: 8px;
+}
+.sidebar .nav-item {
+    padding: 12px 20px; cursor: pointer; font-size: 14px; border-left: 3px solid transparent;
+    transition: all .15s;
+}
+.sidebar .nav-item:hover { background: rgba(255,255,255,.05); }
+.sidebar .nav-item.active { background: rgba(255,255,255,.1); border-left-color: #74b9ff; color: white; }
+
+.main { flex: 1; overflow-y: auto; padding: 20px; }
+
+/* Stats cards */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card {
+    background: white; border-radius: 10px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.stat-card .label { font-size: 12px; color: #636e72; margin-bottom: 6px; }
+.stat-card .value { font-size: 28px; font-weight: 700; color: #2d3436; }
+.stat-card .sub { font-size: 12px; color: #00b894; margin-top: 4px; }
+
+/* Tables */
+.card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 20px; }
+.card h3 { font-size: 15px; margin-bottom: 14px; color: #2d3436; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 10px 12px; background: #f5f6fa; color: #636e72; font-weight: 500; }
+td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+tr:hover td { background: #fafbfc; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.tag-web { background: #dfe6e9; color: #636e72; }
+.tag-wecom { background: #d4f5d4; color: #27ae60; }
+.tag-human { background: #ffeaa7; color: #d35400; }
+.clickable { cursor: pointer; color: #0984e3; }
+.clickable:hover { text-decoration: underline; }
+
+/* Chat detail panel */
+.chat-detail { max-height: 500px; overflow-y: auto; }
+.chat-msg { padding: 8px 12px; margin: 6px 0; border-radius: 10px; max-width: 80%; white-space: pre-wrap; line-height: 1.5; font-size: 13px; }
+.chat-msg.user { background: #dfe6e9; margin-left: auto; text-align: right; }
+.chat-msg.assistant { background: #e8f5e9; }
+.chat-msg .time { font-size: 10px; color: #999; margin-top: 4px; }
+
+/* KB editor */
+.kb-list { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.kb-item {
+    background: #f5f6fa; border: 1px solid #dfe6e9; border-radius: 8px; padding: 10px 16px;
+    cursor: pointer; font-size: 13px; transition: all .15s;
+}
+.kb-item:hover { border-color: #74b9ff; }
+.kb-item.active { border-color: #0984e3; background: #e8f4ff; }
+.kb-editor textarea {
+    width: 100%; min-height: 400px; border: 1px solid #dfe6e9; border-radius: 8px;
+    padding: 14px; font-size: 13px; font-family: "Cascadia Code", "Consolas", monospace;
+    line-height: 1.6; resize: vertical; outline: none;
+}
+.kb-editor textarea:focus { border-color: #0984e3; }
+.btn {
+    padding: 8px 20px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+    transition: opacity .15s;
+}
+.btn-primary { background: #0984e3; color: white; }
+.btn-primary:hover { opacity: .9; }
+.btn-reload { background: #636e72; color: white; margin-left: 8px; }
+
+/* Panels */
+.panel { display: none; }
+.panel.active { display: block; }
+
+.empty { text-align: center; color: #b2bec3; padding: 40px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1>静享时空 · 客服管理后台</h1>
+    <a href="/">← 返回客服测试</a>
+</div>
+
+<div class="layout">
+    <div class="sidebar">
+        <div class="nav-item active" onclick="showPanel('dashboard')">📊 数据概览</div>
+        <div class="nav-item" onclick="showPanel('conversations')">💬 对话记录</div>
+        <div class="nav-item" onclick="showPanel('human')">🔔 转人工记录</div>
+        <div class="nav-item" onclick="showPanel('hotq')">🔥 热门问题</div>
+        <div class="nav-item" onclick="showPanel('knowledge')">📚 知识库管理</div>
+    </div>
+
+    <div class="main">
+        <!-- 数据概览 -->
+        <div id="panel-dashboard" class="panel active">
+            <div class="stats" id="statsCards"></div>
+            <div class="card">
+                <h3>最近对话</h3>
+                <table><thead><tr><th>会话</th><th>渠道</th><th>消息数</th><th>首条消息</th><th>时间</th><th>状态</th></tr></thead>
+                <tbody id="recentTable"></tbody></table>
+            </div>
+        </div>
+
+        <!-- 对话记录 -->
+        <div id="panel-conversations" class="panel">
+            <div class="card">
+                <h3>全部对话</h3>
+                <table><thead><tr><th>会话ID</th><th>渠道</th><th>消息数</th><th>首条消息</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody id="convTable"></tbody></table>
+            </div>
+            <div class="card" id="chatDetailCard" style="display:none">
+                <h3>对话详情 — <span id="chatDetailId"></span></h3>
+                <div class="chat-detail" id="chatDetail"></div>
+            </div>
+        </div>
+
+        <!-- 转人工记录 -->
+        <div id="panel-human" class="panel">
+            <div class="card">
+                <h3>转人工记录</h3>
+                <table><thead><tr><th>用户</th><th>用户消息</th><th>AI回复</th><th>时间</th></tr></thead>
+                <tbody id="humanTable"></tbody></table>
+            </div>
+        </div>
+
+        <!-- 热门问题 -->
+        <div id="panel-hotq" class="panel">
+            <div class="card">
+                <h3>高频问题 TOP 10</h3>
+                <table><thead><tr><th>#</th><th>问题</th><th>次数</th></tr></thead>
+                <tbody id="hotqTable"></tbody></table>
+            </div>
+        </div>
+
+        <!-- 知识库管理 -->
+        <div id="panel-knowledge" class="panel">
+            <div class="card">
+                <h3>知识库文档 <button class="btn btn-reload" onclick="reloadKB()">重新加载知识库</button></h3>
+                <div class="kb-list" id="kbList"></div>
+                <div class="kb-editor" id="kbEditor" style="display:none">
+                    <p style="margin-bottom:8px;font-size:13px;color:#636e72">正在编辑: <strong id="kbEditName"></strong></p>
+                    <textarea id="kbContent"></textarea>
+                    <div style="margin-top:10px">
+                        <button class="btn btn-primary" onclick="saveKB()">保存并重载知识库</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showPanel(name) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    event.target.classList.add('active');
+    if (name === 'dashboard') loadDashboard();
+    if (name === 'conversations') loadConversations();
+    if (name === 'human') loadHumanTransfers();
+    if (name === 'hotq') loadHotQuestions();
+    if (name === 'knowledge') loadKBList();
+}
+
+function fmtTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts * 1000);
+    return d.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '...' : (s || '-'); }
+
+async function loadDashboard() {
+    const [stats, convs] = await Promise.all([
+        fetch('/api/stats').then(r => r.json()),
+        fetch('/api/history?limit=10').then(r => r.json()),
+    ]);
+    document.getElementById('statsCards').innerHTML = `
+        <div class="stat-card"><div class="label">总对话数</div><div class="value">${stats.total_conversations}</div><div class="sub">今日 +${stats.today_conversations}</div></div>
+        <div class="stat-card"><div class="label">总消息数</div><div class="value">${stats.total_messages}</div><div class="sub">今日 +${stats.today_messages}</div></div>
+        <div class="stat-card"><div class="label">转人工次数</div><div class="value">${stats.human_transfers}</div></div>
+        <div class="stat-card"><div class="label">AI解决率</div><div class="value">${stats.total_conversations ? Math.round((1 - stats.human_transfers / Math.max(stats.total_messages,1)) * 100) : 0}%</div></div>
+    `;
+    let html = '';
+    for (const c of convs) {
+        html += `<tr>
+            <td class="clickable" onclick="viewChat('${c.session_id}')">${truncate(c.session_id, 20)}</td>
+            <td><span class="tag tag-${c.channel}">${c.channel}</span></td>
+            <td>${c.msg_count}</td>
+            <td>${truncate(c.first_msg, 30)}</td>
+            <td>${fmtTime(c.updated_at)}</td>
+            <td>${c.has_human_transfer ? '<span class="tag tag-human">需人工</span>' : '✅'}</td>
+        </tr>`;
+    }
+    document.getElementById('recentTable').innerHTML = html || '<tr><td colspan="6" class="empty">暂无对话</td></tr>';
+}
+
+async function loadConversations() {
+    const convs = await fetch('/api/history?limit=50').then(r => r.json());
+    let html = '';
+    for (const c of convs) {
+        html += `<tr>
+            <td>${truncate(c.session_id, 24)}</td>
+            <td><span class="tag tag-${c.channel}">${c.channel}</span></td>
+            <td>${c.msg_count}</td>
+            <td>${truncate(c.first_msg, 40)}</td>
+            <td>${fmtTime(c.updated_at)}</td>
+            <td><span class="clickable" onclick="viewChat('${c.session_id}')">查看</span></td>
+        </tr>`;
+    }
+    document.getElementById('convTable').innerHTML = html || '<tr><td colspan="6" class="empty">暂无对话</td></tr>';
+}
+
+async function viewChat(sid) {
+    showPanel('conversations');
+    const data = await fetch('/api/session/' + encodeURIComponent(sid)).then(r => r.json());
+    const card = document.getElementById('chatDetailCard');
+    card.style.display = 'block';
+    document.getElementById('chatDetailId').textContent = sid;
+    let html = '';
+    for (const m of data.messages) {
+        html += `<div class="chat-msg ${m.role}">
+            ${m.content}
+            <div class="time">${fmtTime(m.created_at)}${m.need_human ? ' | 🔔转人工' : ''}${m.confidence ? ' | 置信度'+Math.round(m.confidence*100)+'%' : ''}</div>
+        </div>`;
+    }
+    document.getElementById('chatDetail').innerHTML = html || '<div class="empty">无消息</div>';
+    card.scrollIntoView({behavior: 'smooth'});
+}
+
+async function loadHumanTransfers() {
+    const list = await fetch('/api/human-transfers').then(r => r.json());
+    let html = '';
+    for (const h of list) {
+        html += `<tr>
+            <td class="clickable" onclick="viewChat('${h.session_id}')">${truncate(h.session_id, 20)}</td>
+            <td>${truncate(h.user_msg, 40)}</td>
+            <td>${truncate(h.ai_reply, 50)}</td>
+            <td>${fmtTime(h.created_at)}</td>
+        </tr>`;
+    }
+    document.getElementById('humanTable').innerHTML = html || '<tr><td colspan="4" class="empty">暂无转人工记录</td></tr>';
+}
+
+async function loadHotQuestions() {
+    const list = await fetch('/api/hot-questions').then(r => r.json());
+    let html = '';
+    list.forEach((q, i) => {
+        html += `<tr><td>${i+1}</td><td>${truncate(q.content, 60)}</td><td>${q.cnt}</td></tr>`;
+    });
+    document.getElementById('hotqTable').innerHTML = html || '<tr><td colspan="3" class="empty">暂无数据</td></tr>';
+}
+
+let currentKBFile = '';
+async function loadKBList() {
+    const docs = await fetch('/api/kb/list').then(r => r.json());
+    let html = '';
+    for (const d of docs) {
+        html += `<div class="kb-item ${d.filename === currentKBFile ? 'active' : ''}" onclick="editKB('${d.filename}')">${d.name}<br><span style="font-size:11px;color:#999">${d.lines}行</span></div>`;
+    }
+    document.getElementById('kbList').innerHTML = html;
+}
+
+async function editKB(filename) {
+    currentKBFile = filename;
+    const data = await fetch('/api/kb/' + encodeURIComponent(filename)).then(r => r.json());
+    document.getElementById('kbEditName').textContent = filename;
+    document.getElementById('kbContent').value = data.content;
+    document.getElementById('kbEditor').style.display = 'block';
+    loadKBList();
+}
+
+async function saveKB() {
+    if (!currentKBFile) return;
+    const content = document.getElementById('kbContent').value;
+    const resp = await fetch('/api/kb/' + encodeURIComponent(currentKBFile), {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content}),
+    });
+    const data = await resp.json();
+    alert(data.message || data.error);
+}
+
+async function reloadKB() {
+    const resp = await fetch('/api/reload-kb', {method: 'POST'});
+    const data = await resp.json();
+    alert(data.message);
+}
+
+// 初始加载
+loadDashboard();
+</script>
+</body>
+</html>

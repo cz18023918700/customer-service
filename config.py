@@ -41,5 +41,8 @@ class Config:
     MAX_HISTORY_TURNS: int = 10
     TRANSFER_CONFIDENCE_THRESHOLD: float = 0.5
 
+    # 转人工通知（企微群机器人 webhook URL）
+    NOTIFY_WEBHOOK: str = os.getenv("NOTIFY_WEBHOOK", "")
+
 
 config = Config()

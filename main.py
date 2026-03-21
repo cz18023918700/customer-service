@@ -22,7 +22,10 @@ from fastapi.staticfiles import StaticFiles
 from config import config
 from engine.chat import chat, get_session_history
 from knowledge.loader import load_knowledge_base
-from models.db import init_db, save_message, get_conversation_stats, get_recent_conversations
+from models.db import (
+    init_db, save_message, get_conversation_stats, get_recent_conversations,
+    get_conversation_messages, get_hot_questions, get_human_transfer_list,
+)
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
 # 日志配置
@@ -171,9 +174,21 @@ async def api_history(limit: int = Query(20)):
 
 @app.get("/api/session/{session_id}")
 async def api_session(session_id: str):
-    """获取某个会话的对话记录"""
-    history = get_session_history(session_id)
-    return {"session_id": session_id, "messages": history}
+    """获取某个会话的完整对话记录（从 DB）"""
+    messages = get_conversation_messages(session_id)
+    return {"session_id": session_id, "messages": messages}
+
+
+@app.get("/api/hot-questions")
+async def api_hot_questions(limit: int = Query(10)):
+    """高频问题统计"""
+    return get_hot_questions(limit)
+
+
+@app.get("/api/human-transfers")
+async def api_human_transfers(limit: int = Query(20)):
+    """需要人工介入的对话"""
+    return get_human_transfer_list(limit)
 
 
 @app.post("/api/reload-kb")
@@ -183,7 +198,54 @@ async def api_reload_kb():
     return {"message": f"知识库重新加载完成，共 {count} 条片段"}
 
 
-# ============ Web 测试界面 ============
+@app.get("/api/kb/list")
+async def api_kb_list():
+    """列出知识库文档"""
+    docs_dir = Path(config.KNOWLEDGE_DIR)
+    docs = []
+    for f in sorted(docs_dir.glob("*.md")):
+        content = f.read_text(encoding="utf-8")
+        docs.append({
+            "name": f.stem,
+            "filename": f.name,
+            "size": len(content),
+            "lines": content.count("\n") + 1,
+        })
+    return docs
+
+
+@app.get("/api/kb/{filename}")
+async def api_kb_read(filename: str):
+    """读取知识库文档内容"""
+    file_path = Path(config.KNOWLEDGE_DIR) / filename
+    if not file_path.exists() or not file_path.suffix == ".md":
+        return JSONResponse({"error": "文档不存在"}, status_code=404)
+    content = file_path.read_text(encoding="utf-8")
+    return {"filename": filename, "content": content}
+
+
+@app.put("/api/kb/{filename}")
+async def api_kb_update(filename: str, request: Request):
+    """更新知识库文档"""
+    file_path = Path(config.KNOWLEDGE_DIR) / filename
+    if not file_path.exists() or not file_path.suffix == ".md":
+        return JSONResponse({"error": "文档不存在"}, status_code=404)
+    data = await request.json()
+    content = data.get("content", "")
+    if not content.strip():
+        return JSONResponse({"error": "内容不能为空"}, status_code=400)
+
+    # 原子写入
+    tmp_path = file_path.with_suffix(".md.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(file_path)
+
+    # 重新加载知识库
+    count = load_knowledge_base(force_reload=True)
+    return {"message": f"文档已更新，知识库重载 {count} 条片段"}
+
+
+# ============ Web 界面 ============
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -192,6 +254,15 @@ async def index():
     if html_path.exists():
         return html_path.read_text(encoding="utf-8")
     return "<h1>静享时空 AI 客服</h1><p>请创建 static/index.html</p>"
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin():
+    """管理后台"""
+    html_path = Path(__file__).parent / "static" / "admin.html"
+    if html_path.exists():
+        return html_path.read_text(encoding="utf-8")
+    return "<h1>管理后台未找到</h1>"
 
 
 if __name__ == "__main__":

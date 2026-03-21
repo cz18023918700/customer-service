@@ -137,7 +137,8 @@ def get_recent_conversations(limit: int = 20) -> list[dict]:
         rows = conn.execute("""
             SELECT c.id, c.session_id, c.channel, c.status, c.created_at, c.updated_at,
                    COUNT(m.id) as msg_count,
-                   MAX(CASE WHEN m.need_human = 1 THEN 1 ELSE 0 END) as has_human_transfer
+                   MAX(CASE WHEN m.need_human = 1 THEN 1 ELSE 0 END) as has_human_transfer,
+                   (SELECT content FROM messages WHERE conversation_id = c.id AND role = 'user' ORDER BY created_at LIMIT 1) as first_msg
             FROM conversations c
             LEFT JOIN messages m ON m.conversation_id = c.id
             GROUP BY c.id
@@ -145,6 +146,56 @@ def get_recent_conversations(limit: int = 20) -> list[dict]:
             LIMIT ?
         """, (limit,)).fetchall()
 
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_conversation_messages(session_id: str) -> list[dict]:
+    """获取某个会话的所有消息（从 DB）"""
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT role, content, confidence, need_human, sources, created_at
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+        """, (session_id,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_hot_questions(limit: int = 10) -> list[dict]:
+    """统计高频问题（用户消息出现最多的关键词）"""
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT content, COUNT(*) as cnt
+            FROM messages
+            WHERE role = 'user'
+            GROUP BY content
+            ORDER BY cnt DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_human_transfer_list(limit: int = 20) -> list[dict]:
+    """获取需要人工介入的对话"""
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT m.session_id, m.content as user_msg, m.created_at,
+                   (SELECT content FROM messages WHERE session_id = m.session_id AND role = 'assistant'
+                    ORDER BY created_at DESC LIMIT 1) as ai_reply
+            FROM messages m
+            WHERE m.need_human = 1 AND m.role = 'assistant'
+            ORDER BY m.created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

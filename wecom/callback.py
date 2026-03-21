@@ -110,11 +110,30 @@ def send_text_reply(user_id: str, content: str) -> bool:
 
 
 def notify_human(user_id: str, user_message: str, ai_reply: str) -> None:
-    """通知人工客服需要介入
-
-    TODO: 后续可对接企微群机器人 webhook 推送到管理员
-    """
+    """通知人工客服需要介入 — 推送到企微群机器人 webhook"""
     logger.warning(f"需要人工介入 | 用户: {user_id} | 消息: {user_message}")
-    # 预留：推送到企微群机器人
-    # webhook_url = config.WECOM_NOTIFY_WEBHOOK
-    # httpx.post(webhook_url, json={"msgtype": "text", "text": {"content": ...}}, timeout=10)
+
+    webhook_url = config.NOTIFY_WEBHOOK
+    if not webhook_url:
+        logger.info("未配置 NOTIFY_WEBHOOK，跳过推送")
+        return
+
+    try:
+        text = (
+            f"🔔 需要人工客服介入\n"
+            f"用户: {user_id}\n"
+            f"消息: {user_message}\n"
+            f"AI回复: {ai_reply[:100]}{'...' if len(ai_reply) > 100 else ''}\n"
+            f"请尽快处理"
+        )
+        resp = httpx.post(
+            webhook_url,
+            json={"msgtype": "text", "text": {"content": text}},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            logger.info(f"人工通知已推送 | 用户: {user_id}")
+        else:
+            logger.warning(f"Webhook 推送失败: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"Webhook 推送异常: {e}")
