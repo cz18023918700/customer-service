@@ -30,7 +30,8 @@ from models.db import (
     save_feedback, get_feedback_stats, export_messages_csv, get_daily_trend,
     save_faq_miss, get_faq_misses, search_conversations, get_response_time_stats,
     get_peak_hours, get_active_sessions_count, get_pending_human_count,
-    close_stale_conversations,
+    close_stale_conversations, get_human_queue, save_human_reply,
+    auto_tag_conversation,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -175,9 +176,10 @@ async def web_chat(request: Request):
 
     elapsed_ms = result.get("elapsed_ms", 0)
 
-    # FAQ 未命中记录（走了 LLM 说明 FAQ 没接住）
+    # FAQ 未命中记录 + 自动打标签
     if not result.get("from_faq"):
         save_faq_miss(user_message)
+    auto_tag_conversation(session_id)
 
     # 保存 AI 回复
     msg_id = save_message(
@@ -358,6 +360,42 @@ async def api_live():
         "active_sessions": get_active_sessions_count(),
         "pending_human": get_pending_human_count(),
     }
+
+
+# ============ 人工客服工作台 ============
+
+@app.get("/api/human-queue", dependencies=[Depends(verify_admin)])
+async def api_human_queue():
+    """待人工处理的对话队列"""
+    return get_human_queue()
+
+
+@app.post("/api/human-reply", dependencies=[Depends(verify_admin)])
+async def api_human_reply(request: Request):
+    """人工客服回复"""
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
+    session_id = data.get("session_id", "")
+    content = data.get("content", "").strip()
+    operator = data.get("operator", "店长")
+
+    if not session_id or not content:
+        return JSONResponse({"error": "参数缺失"}, status_code=400)
+
+    msg_id = save_human_reply(session_id, content, operator)
+    if not msg_id:
+        return JSONResponse({"error": "会话不存在或已关闭"}, status_code=404)
+
+    return {"message": "回复已发送", "message_id": msg_id}
+
+
+@app.get("/workbench", response_class=HTMLResponse)
+async def workbench():
+    """人工客服工作台页面"""
+    html_path = Path(__file__).parent / "static" / "workbench.html"
+    if html_path.exists():
+        return html_path.read_text(encoding="utf-8")
+    return "<h1>工作台未找到</h1>"
 
 
 @app.get("/api/export-csv", dependencies=[Depends(verify_admin)])

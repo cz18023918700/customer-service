@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>静享时空 · 人工客服工作台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; height: 100vh; display: flex; flex-direction: column; }
+
+.topbar {
+    background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
+    color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+}
+.topbar h1 { font-size: 16px; }
+.topbar .links a { color: #74b9ff; text-decoration: none; font-size: 12px; margin-left: 12px; }
+.badge { background: #e74c3c; color: white; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-left: 8px; }
+
+.workspace { flex: 1; display: flex; overflow: hidden; }
+
+/* 左侧队列 */
+.queue { width: 320px; background: white; border-right: 1px solid #e8e8e8; overflow-y: auto; flex-shrink: 0; }
+.queue-header { padding: 14px 16px; font-size: 14px; font-weight: 600; border-bottom: 1px solid #f0f0f0; color: #2d3436; }
+.queue-item {
+    padding: 12px 16px; border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: background .15s;
+}
+.queue-item:hover { background: #f8f9fa; }
+.queue-item.active { background: #e8f4ff; border-left: 3px solid #0984e3; }
+.queue-item .name { font-size: 13px; font-weight: 500; color: #2d3436; }
+.queue-item .preview { font-size: 12px; color: #999; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-item .meta { font-size: 11px; color: #b2bec3; margin-top: 4px; display: flex; justify-content: space-between; }
+.queue-item .tag { background: #dfe6e9; color: #636e72; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
+.queue-empty { padding: 40px; text-align: center; color: #b2bec3; font-size: 14px; }
+
+/* 右侧对话 */
+.chat-panel { flex: 1; display: flex; flex-direction: column; }
+.chat-header { padding: 12px 16px; background: white; border-bottom: 1px solid #e8e8e8; font-size: 14px; color: #2d3436; flex-shrink: 0; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+.msg { max-width: 75%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: #dfe6e9; color: #2d3436; border-bottom-right-radius: 4px; }
+.msg.assistant { align-self: flex-start; background: #e8f5e9; color: #2d3436; border-bottom-left-radius: 4px; }
+.msg.human { align-self: flex-start; background: #fff3cd; color: #856404; border-bottom-left-radius: 4px; border: 1px solid #ffc107; }
+.msg .msg-meta { font-size: 10px; color: #999; margin-top: 4px; }
+
+.reply-area {
+    padding: 12px 16px; background: white; border-top: 1px solid #e8e8e8; flex-shrink: 0;
+}
+.reply-area .quick-replies { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.quick-reply {
+    background: #f5f6fa; border: 1px solid #dfe6e9; border-radius: 14px; padding: 4px 12px;
+    font-size: 11px; color: #636e72; cursor: pointer; transition: all .15s;
+}
+.quick-reply:hover { border-color: #0984e3; color: #0984e3; }
+.reply-row { display: flex; gap: 8px; }
+.reply-row textarea {
+    flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px;
+    resize: none; height: 40px; outline: none; font-family: inherit;
+}
+.reply-row textarea:focus { border-color: #0984e3; }
+.reply-row button {
+    background: #0984e3; color: white; border: none; border-radius: 8px; padding: 8px 20px;
+    font-size: 13px; cursor: pointer;
+}
+.reply-row button:hover { opacity: .9; }
+
+.no-selection { flex: 1; display: flex; align-items: center; justify-content: center; color: #b2bec3; font-size: 16px; }
+
+@media (max-width: 768px) {
+    .queue { width: 100%; position: absolute; z-index: 10; height: 100%; }
+    .chat-panel { display: none; }
+    .workspace.has-selection .queue { display: none; }
+    .workspace.has-selection .chat-panel { display: flex; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1>🎧 人工客服工作台 <span class="badge" id="queueBadge" style="display:none"></span></h1>
+    <div class="links">
+        <a href="/admin">管理后台</a>
+        <a href="/">客服测试</a>
+    </div>
+</div>
+
+<div class="workspace" id="workspace">
+    <div class="queue">
+        <div class="queue-header">待处理对话 <span id="queueCount" style="color:#999;font-weight:400"></span></div>
+        <div id="queueList"></div>
+    </div>
+
+    <div class="chat-panel" id="chatPanel" style="display:none">
+        <div class="chat-header" id="chatHeader">选择一个对话</div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="reply-area">
+            <div class="quick-replies">
+                <span class="quick-reply" onclick="useQuick('好的，我来帮你处理，请稍等~')">稍等处理</span>
+                <span class="quick-reply" onclick="useQuick('已经帮你处理好了，还有其他问题吗？')">已处理</span>
+                <span class="quick-reply" onclick="useQuick('抱歉给你带来不便，我们会尽快改进')">致歉</span>
+                <span class="quick-reply" onclick="useQuick('维修人员15分钟内到，这段时间免费延时30分钟补偿~')">派维修</span>
+                <span class="quick-reply" onclick="useQuick('退款已提交，1-3个工作日到账，请注意查收')">退款确认</span>
+                <span class="quick-reply" onclick="useQuick('感谢反馈，我们会改进。送你一张8折优惠券作为补偿~')">补偿优惠</span>
+            </div>
+            <div class="reply-row">
+                <textarea id="replyInput" placeholder="输入回复..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendReply()}"></textarea>
+                <button onclick="sendReply()">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="no-selection" id="noSelection">← 从左侧选择一个对话开始处理</div>
+</div>
+
+<script>
+let currentSession = '';
+
+async function loadQueue() {
+    const list = await fetch('/api/human-queue').then(r => r.json());
+    const badge = document.getElementById('queueBadge');
+    const count = document.getElementById('queueCount');
+
+    if (list.length > 0) {
+        badge.textContent = list.length;
+        badge.style.display = 'inline';
+        count.textContent = `(${list.length}条)`;
+    } else {
+        badge.style.display = 'none';
+        count.textContent = '';
+    }
+
+    const el = document.getElementById('queueList');
+    if (list.length === 0) {
+        el.innerHTML = '<div class="queue-empty">暂无待处理对话 ✅<br><span style="font-size:12px">AI 正在处理所有问题</span></div>';
+        return;
+    }
+
+    el.innerHTML = list.map(q => {
+        const tags = q.tags ? q.tags.split(',').map(t => `<span class="tag">${t}</span>`).join(' ') : '';
+        const time = new Date(q.updated_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+        return `<div class="queue-item ${q.session_id === currentSession ? 'active' : ''}" onclick="openChat('${q.session_id}')">
+            <div class="name">${q.session_id.slice(0, 16)}... <span style="float:right;font-size:11px;color:#999">${q.msg_count}条</span></div>
+            <div class="preview">${(q.last_user_msg || '').slice(0, 40)}</div>
+            <div class="meta"><span>${tags}</span><span>${time}</span></div>
+        </div>`;
+    }).join('');
+}
+
+async function openChat(sid) {
+    currentSession = sid;
+    document.getElementById('chatPanel').style.display = 'flex';
+    document.getElementById('noSelection').style.display = 'none';
+    document.getElementById('workspace').classList.add('has-selection');
+
+    const data = await fetch('/api/session/' + encodeURIComponent(sid)).then(r => r.json());
+    document.getElementById('chatHeader').textContent = `对话: ${sid.slice(0, 20)}... (${data.messages.length}条消息)`;
+
+    const el = document.getElementById('chatMessages');
+    el.innerHTML = data.messages.map(m => {
+        const roleLabel = m.role === 'user' ? '用户' : m.role === 'human' ? '👤 人工' : '🤖 AI';
+        const time = new Date(m.created_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+        return `<div class="msg ${m.role}">
+            ${m.content}
+            <div class="msg-meta">${roleLabel} · ${time}${m.need_human ? ' · 🔔转人工' : ''}</div>
+        </div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+
+    loadQueue(); // 刷新左侧
+    document.getElementById('replyInput').focus();
+}
+
+function useQuick(text) {
+    document.getElementById('replyInput').value = text;
+    document.getElementById('replyInput').focus();
+}
+
+async function sendReply() {
+    if (!currentSession) return;
+    const input = document.getElementById('replyInput');
+    const content = input.value.trim();
+    if (!content) return;
+
+    input.value = '';
+
+    const resp = await fetch('/api/human-reply', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: currentSession, content: content}),
+    });
+
+    if (resp.ok) {
+        openChat(currentSession); // 刷新对话
+    } else {
+        alert('发送失败');
+    }
+}
+
+// 初始加载 + 15秒自动刷新
+loadQueue();
+setInterval(loadQueue, 15000);
+</script>
+</body>
+</html>

@@ -70,10 +70,15 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
         """)
         # 安全加列（已有表不报错）
-        try:
-            conn.execute("ALTER TABLE messages ADD COLUMN elapsed_ms INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass  # 列已存在
+        for col_sql in [
+            "ALTER TABLE messages ADD COLUMN elapsed_ms INTEGER DEFAULT 0",
+            "ALTER TABLE conversations ADD COLUMN tags TEXT DEFAULT ''",
+            "ALTER TABLE conversations ADD COLUMN assigned_to TEXT DEFAULT ''",
+        ]:
+            try:
+                conn.execute(col_sql)
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
         logger.info("数据库初始化完成")
 
@@ -382,11 +387,11 @@ def get_pending_human_count() -> int:
     """获取未处理的转人工数量"""
     with get_db() as conn:
         return conn.execute("""
-            SELECT COUNT(DISTINCT session_id) FROM messages
-            WHERE need_human = 1
-            AND session_id NOT IN (
-                SELECT session_id FROM messages
-                WHERE content LIKE '%已处理%' OR content LIKE '%已解决%'
+            SELECT COUNT(DISTINCT m.session_id) FROM messages m
+            JOIN conversations c ON c.session_id = m.session_id
+            WHERE m.need_human = 1 AND c.status = 'active'
+            AND m.session_id NOT IN (
+                SELECT session_id FROM messages WHERE role = 'human'
             )
         """).fetchone()[0]
 
@@ -401,3 +406,83 @@ def close_stale_conversations(hours: int = 2) -> int:
         )
         conn.commit()
         return cursor.rowcount
+
+
+def get_human_queue() -> list[dict]:
+    """获取待人工处理的对话队列"""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT c.session_id, c.channel, c.tags, c.updated_at,
+                   (SELECT content FROM messages WHERE session_id = c.session_id AND role = 'user'
+                    ORDER BY created_at DESC LIMIT 1) as last_user_msg,
+                   (SELECT content FROM messages WHERE session_id = c.session_id AND role = 'assistant'
+                    ORDER BY created_at DESC LIMIT 1) as last_ai_reply,
+                   (SELECT COUNT(*) FROM messages WHERE session_id = c.session_id) as msg_count
+            FROM conversations c
+            JOIN messages m ON m.session_id = c.session_id
+            WHERE m.need_human = 1 AND c.status = 'active'
+            AND c.session_id NOT IN (
+                SELECT session_id FROM messages WHERE role = 'human'
+            )
+            ORDER BY c.updated_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_human_reply(session_id: str, content: str, operator: str = "店长") -> int:
+    """保存人工客服回复"""
+    now = time.time()
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM conversations WHERE session_id = ? AND status = 'active'",
+            (session_id,)
+        ).fetchone()
+        if not row:
+            return 0
+
+        conv_id = row["id"]
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conv_id))
+
+        cursor = conn.execute(
+            "INSERT INTO messages (conversation_id, session_id, role, content, confidence, need_human, sources, created_at, elapsed_ms) VALUES (?, ?, 'human', ?, 1.0, 0, ?, ?, 0)",
+            (conv_id, session_id, content, f"人工:{operator}", now)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def tag_conversation(session_id: str, tags: str) -> bool:
+    """给对话打标签"""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE conversations SET tags = ? WHERE session_id = ?",
+            (tags, session_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def auto_tag_conversation(session_id: str) -> str:
+    """根据对话内容自动打标签"""
+    msgs = get_conversation_messages(session_id)
+    user_texts = " ".join(m["content"] for m in msgs if m["role"] == "user")
+
+    tag_rules = {
+        "价格咨询": ["多少钱", "价格", "收费", "费用"],
+        "预约": ["预约", "订", "下单"],
+        "会员": ["会员", "折扣", "优惠", "积分"],
+        "设备故障": ["故障", "坏了", "没声音", "不工作", "不制冷"],
+        "投诉": ["投诉", "差评", "不满意", "太差"],
+        "退款": ["退款", "退钱"],
+        "新手": ["第一次", "怎么用", "怎么进"],
+        "位置": ["在哪", "地址", "怎么去"],
+    }
+
+    matched = []
+    for tag, keywords in tag_rules.items():
+        if any(kw in user_texts for kw in keywords):
+            matched.append(tag)
+
+    tags = ",".join(matched[:3]) if matched else "其他"
+    tag_conversation(session_id, tags)
+    return tags
