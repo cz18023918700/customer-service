@@ -26,7 +26,7 @@ from knowledge.loader import load_knowledge_base
 from models.db import (
     init_db, save_message, get_conversation_stats, get_recent_conversations,
     get_conversation_messages, get_hot_questions, get_human_transfer_list,
-    save_feedback, get_feedback_stats, export_messages_csv,
+    save_feedback, get_feedback_stats, export_messages_csv, get_daily_trend,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -282,6 +282,50 @@ async def api_export_csv():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=conversations.csv"},
     )
+
+
+@app.get("/api/trend", dependencies=[Depends(verify_admin)])
+async def api_trend(days: int = Query(7)):
+    """每日趋势数据"""
+    return get_daily_trend(min(days, 30))
+
+
+@app.get("/api/greeting")
+async def api_greeting(session_id: str = Query("")):
+    """智能欢迎语 — 根据时段和是否回头客返回不同问候"""
+    from datetime import datetime
+    hour = datetime.now().hour
+
+    if 6 <= hour < 11:
+        period_greeting = "早上好"
+    elif 11 <= hour < 14:
+        period_greeting = "中午好"
+    elif 14 <= hour < 18:
+        period_greeting = "下午好"
+    elif 18 <= hour < 22:
+        period_greeting = "晚上好"
+    else:
+        period_greeting = "夜深了"
+
+    # 检查是否回头客
+    is_returning = False
+    if session_id:
+        msgs = get_conversation_messages(session_id)
+        is_returning = len(msgs) > 0
+
+    if is_returning:
+        greeting = f"{period_greeting}！欢迎回来~ 😊 上次聊到哪了？有什么新问题随时问我！"
+    else:
+        tip = {
+            "早上好": "上午时段包厢价格最实惠哦~",
+            "中午好": "下午时段包厢也很划算~",
+            "下午好": "下午时段包厢很划算，要不要来一场？",
+            "晚上好": "晚上是唱歌的黄金时段，大包厢等你来嗨~",
+            "夜深了": "深夜也照常营业，包厢随时可以订~",
+        }.get(period_greeting, "")
+        greeting = f"{period_greeting}！我是静享时空的小助手「小享」~ 😊\n{tip}\n有什么想了解的随时问我！"
+
+    return {"greeting": greeting, "is_returning": is_returning}
 
 
 @app.post("/api/reload-kb", dependencies=[Depends(verify_admin)])

@@ -105,12 +105,9 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 </div>
 
 <div class="chat-container" id="chatContainer">
-    <div class="message assistant">
+    <div class="message assistant" id="greetingMsg">
         <div class="avatar">🎵</div>
-        <div>
-            <div class="bubble">你好呀！我是静享时空的小助手「小享」~ 😊
-有什么想了解的？比如包厢价格、怎么预约、会员福利什么的，随时问我！</div>
-        </div>
+        <div><div class="bubble" id="greetingText">正在加载...</div></div>
     </div>
 </div>
 
@@ -265,6 +262,17 @@ async function sendFeedback(btn, rating, messageId) {
         btn.title = '网络错误';
     }
 }
+
+// 智能欢迎语
+(async () => {
+    try {
+        const resp = await fetch('/api/greeting?session_id=' + encodeURIComponent(sessionId));
+        const data = await resp.json();
+        document.getElementById('greetingText').textContent = data.greeting;
+    } catch (e) {
+        document.getElementById('greetingText').textContent = '你好呀！我是静享时空的小助手「小享」~ 😊\n有什么想了解的随时问我！';
+    }
+})();
 
 input.focus();
 </script>

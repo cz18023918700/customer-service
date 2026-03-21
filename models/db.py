@@ -214,6 +214,48 @@ def get_human_transfer_list(limit: int = 20) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_daily_trend(days: int = 7) -> list[dict]:
+    """获取最近 N 天的每日趋势数据"""
+    from datetime import datetime, timedelta
+    with get_db() as conn:
+        result = []
+        for i in range(days - 1, -1, -1):
+            day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
+            day_start = day.timestamp()
+            day_end = day_start + 86400
+
+            convs = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE created_at >= ? AND created_at < ?",
+                (day_start, day_end)
+            ).fetchone()[0]
+            msgs = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE created_at >= ? AND created_at < ?",
+                (day_start, day_end)
+            ).fetchone()[0]
+            human = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE need_human = 1 AND created_at >= ? AND created_at < ?",
+                (day_start, day_end)
+            ).fetchone()[0]
+            fb_pos = conn.execute(
+                "SELECT COUNT(*) FROM feedback WHERE rating > 0 AND created_at >= ? AND created_at < ?",
+                (day_start, day_end)
+            ).fetchone()[0]
+            fb_neg = conn.execute(
+                "SELECT COUNT(*) FROM feedback WHERE rating < 0 AND created_at >= ? AND created_at < ?",
+                (day_start, day_end)
+            ).fetchone()[0]
+
+            result.append({
+                "date": day.strftime("%m-%d"),
+                "conversations": convs,
+                "messages": msgs,
+                "human_transfers": human,
+                "feedback_positive": fb_pos,
+                "feedback_negative": fb_neg,
+            })
+        return result
+
+
 def export_messages_csv() -> str:
     """导出所有对话为 CSV 格式字符串"""
     with get_db() as conn:

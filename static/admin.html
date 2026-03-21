@@ -82,11 +82,31 @@ tr:hover td { background: #fafbfc; }
 .btn-primary:hover { opacity: .9; }
 .btn-reload { background: #636e72; color: white; margin-left: 8px; }
 
+/* Trend chart */
+.trend-chart { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding: 10px 0; }
+.trend-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.trend-bar .bar { width: 100%; min-width: 20px; background: linear-gradient(180deg, #667eea, #764ba2); border-radius: 4px 4px 0 0; transition: height .3s; }
+.trend-bar .label { font-size: 10px; color: #999; }
+.trend-bar .val { font-size: 10px; color: #333; font-weight: 600; }
+
 /* Panels */
 .panel { display: none; }
 .panel.active { display: block; }
 
 .empty { text-align: center; color: #b2bec3; padding: 40px; font-size: 14px; }
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .layout { flex-direction: column; }
+    .sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding: 0; }
+    .sidebar .nav-item { padding: 10px 14px; font-size: 12px; white-space: nowrap; border-left: none; border-bottom: 3px solid transparent; }
+    .sidebar .nav-item.active { border-bottom-color: #74b9ff; border-left-color: transparent; }
+    .main { padding: 12px; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .stat-card .value { font-size: 22px; }
+    table { font-size: 12px; }
+    th, td { padding: 6px 8px; }
+}
 </style>
 </head>
 <body>
@@ -110,7 +130,11 @@ tr:hover td { background: #fafbfc; }
         <div id="panel-dashboard" class="panel active">
             <div class="stats" id="statsCards"></div>
             <div class="card">
-                <h3>最近对话</h3>
+                <h3>7日趋势（对话量）</h3>
+                <div class="trend-chart" id="trendChart"></div>
+            </div>
+            <div class="card">
+                <h3>最近对话 <span style="font-size:11px;color:#999;margin-left:8px">每30秒自动刷新</span></h3>
                 <table><thead><tr><th>会话</th><th>渠道</th><th>消息数</th><th>首条消息</th><th>时间</th><th>状态</th></tr></thead>
                 <tbody id="recentTable"></tbody></table>
             </div>
@@ -185,10 +209,22 @@ function fmtTime(ts) {
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '...' : (s || '-'); }
 
 async function loadDashboard() {
-    const [stats, convs] = await Promise.all([
+    const [stats, convs, trend] = await Promise.all([
         fetch('/api/stats').then(r => r.json()),
         fetch('/api/history?limit=10').then(r => r.json()),
+        fetch('/api/trend?days=7').then(r => r.json()),
     ]);
+
+    // 趋势图
+    const maxConvs = Math.max(...trend.map(d => d.conversations), 1);
+    document.getElementById('trendChart').innerHTML = trend.map(d => {
+        const h = Math.max(4, (d.conversations / maxConvs) * 100);
+        return `<div class="trend-bar">
+            <div class="val">${d.conversations}</div>
+            <div class="bar" style="height:${h}px"></div>
+            <div class="label">${d.date}</div>
+        </div>`;
+    }).join('');
     const fb = stats.feedback || {};
     const totalReplies = (stats.faq_replies || 0) + (stats.llm_replies || 0);
     const faqRate = totalReplies ? Math.round((stats.faq_replies || 0) / totalReplies * 100) : 0;
@@ -309,6 +345,14 @@ async function reloadKB() {
 
 // 初始加载
 loadDashboard();
+
+// 30秒自动刷新（仅 dashboard 面板活跃时）
+setInterval(() => {
+    const panel = document.getElementById('panel-dashboard');
+    if (panel && panel.classList.contains('active')) {
+        loadDashboard();
+    }
+}, 30000);
 </script>
 </body>
 </html>
