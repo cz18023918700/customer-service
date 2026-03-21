@@ -10,6 +10,7 @@
 - /               GET   Web 测试界面
 """
 
+import json
 import logging
 import sys
 import time
@@ -115,7 +116,8 @@ async def health():
 @app.post("/chat")
 async def web_chat(request: Request):
     """Web 端对话"""
-    data = await request.json()
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
     user_message = data.get("message", "").strip()
     session_id = data.get("session_id", str(uuid.uuid4()))
 
@@ -226,7 +228,8 @@ async def wecom_message(
 @app.post("/api/feedback")
 async def api_feedback(request: Request):
     """满意度反馈"""
-    data = await request.json()
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
     session_id = data.get("session_id", "")
     message_id = data.get("message_id", 0)
     rating = data.get("rating", 0)  # 1=👍, -1=👎
@@ -367,7 +370,8 @@ async def api_kb_update(filename: str, request: Request):
     file_path = Path(config.KNOWLEDGE_DIR) / filename
     if not file_path.exists() or not file_path.suffix == ".md":
         return JSONResponse({"error": "文档不存在"}, status_code=404)
-    data = await request.json()
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
     content = data.get("content", "")
     if not content.strip():
         return JSONResponse({"error": "内容不能为空"}, status_code=400)
