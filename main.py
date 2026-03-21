@@ -97,8 +97,39 @@ async def startup():
     logger.info("正在加载知识库...")
     count = load_knowledge_base()
     logger.info(f"知识库加载完成，共 {count} 条文档片段")
+
+    # 启动自检
+    _self_check()
+
     logger.info(f"静享时空 AI 客服启动完成 | http://localhost:{config.PORT}")
     logger.info(f"管理后台: http://localhost:{config.PORT}/admin")
+
+
+def _self_check():
+    """启动自检：验证 FAQ 和 RAG 核心功能"""
+    from engine.faq import match_faq
+    from knowledge.loader import query_knowledge
+
+    checks = [
+        ("FAQ-价格", lambda: match_faq("大包厢多少钱") is not None),
+        ("FAQ-预约", lambda: match_faq("怎么预约") is not None),
+        ("FAQ-会员", lambda: match_faq("会员优惠") is not None),
+        ("RAG-检索", lambda: len(query_knowledge("包厢价格", top_k=1)) > 0),
+    ]
+    passed = 0
+    for name, check_fn in checks:
+        try:
+            if check_fn():
+                passed += 1
+            else:
+                logger.error(f"自检失败: {name}")
+        except Exception as e:
+            logger.error(f"自检异常: {name} - {e}")
+
+    if passed == len(checks):
+        logger.info(f"自检通过: {passed}/{len(checks)}")
+    else:
+        logger.warning(f"自检部分失败: {passed}/{len(checks)}，请检查知识库和FAQ")
 
 
 @app.get("/health")

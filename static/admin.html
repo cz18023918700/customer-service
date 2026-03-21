@@ -300,9 +300,15 @@ async function viewChat(sid) {
     document.getElementById('chatDetailId').textContent = sid;
     let html = '';
     for (const m of data.messages) {
+        const tags = [];
+        if (m.sources === 'FAQ') tags.push('<span style="background:#e8f5e9;color:#27ae60;padding:1px 6px;border-radius:8px;font-size:10px">FAQ秒回</span>');
+        else if (m.role === 'assistant' && m.sources) tags.push('<span style="background:#e8f4ff;color:#0984e3;padding:1px 6px;border-radius:8px;font-size:10px">LLM</span>');
+        if (m.need_human) tags.push('🔔转人工');
+        if (m.confidence) tags.push('置信度'+Math.round(m.confidence*100)+'%');
+        if (m.elapsed_ms) tags.push(m.elapsed_ms+'ms');
         html += `<div class="chat-msg ${m.role}">
             ${m.content}
-            <div class="time">${fmtTime(m.created_at)}${m.need_human ? ' | 🔔转人工' : ''}${m.confidence ? ' | 置信度'+Math.round(m.confidence*100)+'%' : ''}</div>
+            <div class="time">${fmtTime(m.created_at)} ${tags.join(' | ')}</div>
         </div>`;
     }
     document.getElementById('chatDetail').innerHTML = html || '<div class="empty">无消息</div>';

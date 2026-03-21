@@ -163,7 +163,7 @@ def get_conversation_messages(session_id: str) -> list[dict]:
     """获取某个会话的所有消息（从 DB）"""
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT role, content, confidence, need_human, sources, created_at
+            SELECT role, content, confidence, need_human, sources, created_at, elapsed_ms
             FROM messages
             WHERE session_id = ?
             ORDER BY created_at ASC

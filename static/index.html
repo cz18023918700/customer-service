@@ -92,6 +92,26 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .typing span:nth-child(2) { animation-delay: .2s; }
 .typing span:nth-child(3) { animation-delay: .4s; }
 
+.msg-time { font-size: 10px; color: #bbb; margin-top: 4px; }
+
+.scroll-bottom {
+    position: fixed; bottom: 80px; right: 20px; width: 36px; height: 36px;
+    background: #667eea; color: white; border: none; border-radius: 50%;
+    font-size: 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    display: none; z-index: 10; transition: opacity .2s;
+}
+.scroll-bottom:hover { opacity: .9; }
+
+@media (max-width: 640px) {
+    .message { max-width: 92%; }
+    .suggestions { padding-left: 10px; }
+    .suggest-btn { font-size: 11px; padding: 5px 10px; }
+    .input-area { padding: 10px 12px; }
+    .input-area input { padding: 8px 14px; font-size: 13px; }
+    .input-area button { padding: 8px 18px; font-size: 13px; }
+    .header h1 { font-size: 16px; }
+}
+
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes bounce { to { transform: translateY(-6px); } }
 </style>
@@ -119,6 +139,8 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     <button class="suggest-btn" onclick="sendQuick('店在哪里？怎么去？')">📍 位置导航</button>
     <button class="suggest-btn" onclick="sendQuick('3个人适合什么包厢？')">👥 推荐房型</button>
 </div>
+
+<button class="scroll-bottom" id="scrollBtn" onclick="scrollToBottom()">↓</button>
 
 <div class="input-area">
     <input type="text" id="msgInput" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter')sendMsg()">
@@ -153,11 +175,15 @@ function addMessage(role, content, meta) {
         </div>`;
     }
 
+    const now = new Date();
+    const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
     div.innerHTML = `
         <div class="avatar">${avatar}</div>
         <div style="flex:1;min-width:0">
             <div class="bubble">${formatReply(content)}</div>
             ${footerHtml}
+            <div class="msg-time">${timeStr}</div>
         </div>
     `;
     container.appendChild(div);
@@ -264,6 +290,14 @@ async function sendFeedback(btn, rating, messageId) {
         btn.title = '网络错误';
     }
 }
+
+// 滚动检测
+const scrollBtn = document.getElementById('scrollBtn');
+container.addEventListener('scroll', () => {
+    const gap = container.scrollHeight - container.scrollTop - container.clientHeight;
+    scrollBtn.style.display = gap > 200 ? 'block' : 'none';
+});
+function scrollToBottom() { container.scrollTop = container.scrollHeight; }
 
 // 智能欢迎语
 (async () => {
