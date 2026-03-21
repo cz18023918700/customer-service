@@ -2,12 +2,11 @@
 
 import logging
 import time
-from collections import defaultdict
-from datetime import datetime
 
 from openai import OpenAI
 
 from config import config
+from engine.constants import SUGGESTIONS_SEPARATOR
 from engine.prompt import build_system_prompt
 from engine.faq import match_faq
 from knowledge.loader import query_knowledge
@@ -55,12 +54,18 @@ def _get_session_msgs(session_id: str) -> list[dict]:
     return _sessions[session_id]["msgs"]
 
 
+_llm_client: OpenAI | None = None
+
+
 def get_llm_client() -> OpenAI:
-    """获取 DeepSeek 客户端"""
-    return OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
-    )
+    """获取 DeepSeek 客户端（单例，复用连接池）"""
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = OpenAI(
+            api_key=config.DEEPSEEK_API_KEY,
+            base_url=config.DEEPSEEK_BASE_URL,
+        )
+    return _llm_client
 
 
 def chat(session_id: str, user_message: str) -> dict:
@@ -147,8 +152,8 @@ def chat(session_id: str, user_message: str) -> dict:
 
     # 4. 解析 suggestions
     suggestions = DEFAULT_SUGGESTIONS
-    if "---suggestions---" in reply:
-        parts = reply.split("---suggestions---", 1)
+    if SUGGESTIONS_SEPARATOR in reply:
+        parts = reply.split(SUGGESTIONS_SEPARATOR, 1)
         reply = parts[0].strip()
         raw_suggestions = parts[1].strip().split("\n")
         parsed = [s.strip() for s in raw_suggestions if s.strip()]

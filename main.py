@@ -60,17 +60,26 @@ app = FastAPI(title="静享时空 AI 客服", version="1.0.0")
 
 # ============ 限流器 ============
 _rate_limits: dict[str, list[float]] = {}  # {key: [timestamps]}
+_rate_limit_last_cleanup = 0.0
 RATE_LIMIT_MAX = 20  # 每分钟最多请求数
 RATE_LIMIT_WINDOW = 60  # 窗口秒数
 
 
 def check_rate_limit(key: str) -> bool:
     """检查是否超限，返回 True 表示允许"""
+    global _rate_limit_last_cleanup
     now = time.time()
+
+    # 每 5 分钟清理无活动的 key，防止内存泄漏
+    if now - _rate_limit_last_cleanup > 300:
+        _rate_limit_last_cleanup = now
+        stale = [k for k, v in _rate_limits.items() if not v or now - v[-1] > RATE_LIMIT_WINDOW]
+        for k in stale:
+            del _rate_limits[k]
+
     if key not in _rate_limits:
         _rate_limits[key] = []
 
-    # 清理过期记录
     _rate_limits[key] = [t for t in _rate_limits[key] if now - t < RATE_LIMIT_WINDOW]
 
     if len(_rate_limits[key]) >= RATE_LIMIT_MAX:
@@ -78,6 +87,21 @@ def check_rate_limit(key: str) -> bool:
 
     _rate_limits[key].append(now)
     return True
+
+
+# ============ HTML 缓存 ============
+_html_cache: dict[str, str] = {}
+
+
+def _serve_html(filename: str, fallback: str = "<h1>页面未找到</h1>") -> HTMLResponse:
+    """从 static/ 读取 HTML 文件（DEBUG 模式不缓存）"""
+    if config.DEBUG or filename not in _html_cache:
+        html_path = Path(__file__).parent / "static" / filename
+        if html_path.exists():
+            _html_cache[filename] = html_path.read_text(encoding="utf-8")
+        else:
+            return HTMLResponse(fallback)
+    return HTMLResponse(_html_cache[filename])
 
 
 def verify_admin(request: Request) -> None:
@@ -168,12 +192,11 @@ async def health():
 async def status():
     """系统状态汇总（一页看全局）"""
     import platform
-    from pathlib import Path as _Path
 
     stats = get_conversation_stats()
     fb = get_feedback_stats()
     rt = get_response_time_stats()
-    db_path = _Path(__file__).parent / "customer_service.db"
+    db_path = Path(__file__).parent / "customer_service.db"
     db_size = db_path.stat().st_size / 1024 if db_path.exists() else 0
 
     return {
@@ -236,10 +259,13 @@ async def web_chat(request: Request):
 
     elapsed_ms = result.get("elapsed_ms", 0)
 
-    # FAQ 未命中记录 + 自动打标签
+    # FAQ 未命中记录
     if not result.get("from_faq"):
         save_faq_miss(user_message)
-    auto_tag_conversation(session_id)
+
+    # 自动打标签（仅在对话有足够内容时，避免每次重复写入）
+    if result.get("need_human") or not result.get("from_faq"):
+        auto_tag_conversation(session_id)
 
     # 保存 AI 回复
     msg_id = save_message(
@@ -452,10 +478,7 @@ async def api_human_reply(request: Request):
 @app.get("/workbench", response_class=HTMLResponse)
 async def workbench():
     """人工客服工作台页面"""
-    html_path = Path(__file__).parent / "static" / "workbench.html"
-    if html_path.exists():
-        return html_path.read_text(encoding="utf-8")
-    return "<h1>工作台未找到</h1>"
+    return _serve_html("workbench.html")
 
 
 @app.get("/api/export-csv", dependencies=[Depends(verify_admin)])
@@ -479,19 +502,8 @@ async def api_trend(days: int = Query(7)):
 @app.get("/api/greeting")
 async def api_greeting(session_id: str = Query("")):
     """智能欢迎语 — 根据时段和是否回头客返回不同问候"""
-    from datetime import datetime
-    hour = datetime.now().hour
-
-    if 6 <= hour < 11:
-        period_greeting = "早上好"
-    elif 11 <= hour < 14:
-        period_greeting = "中午好"
-    elif 14 <= hour < 18:
-        period_greeting = "下午好"
-    elif 18 <= hour < 22:
-        period_greeting = "晚上好"
-    else:
-        period_greeting = "夜深了"
+    from engine.constants import get_greeting_prefix
+    period_greeting = get_greeting_prefix()
 
     # 检查是否回头客
     is_returning = False
@@ -574,19 +586,13 @@ async def api_kb_update(filename: str, request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """Web 测试聊天界面"""
-    html_path = Path(__file__).parent / "static" / "index.html"
-    if html_path.exists():
-        return html_path.read_text(encoding="utf-8")
-    return "<h1>静享时空 AI 客服</h1><p>请创建 static/index.html</p>"
+    return _serve_html("index.html")
 
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin():
     """管理后台"""
-    html_path = Path(__file__).parent / "static" / "admin.html"
-    if html_path.exists():
-        return html_path.read_text(encoding="utf-8")
-    return "<h1>管理后台未找到</h1>"
+    return _serve_html("admin.html")
 
 
 if __name__ == "__main__":

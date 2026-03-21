@@ -50,17 +50,10 @@ SYSTEM_PROMPT = """你是「静享时空」无人休闲馆的 AI 客服小助手
 def build_system_prompt(context: str) -> str:
     """构建系统提示词，注入 RAG 上下文和当前时间"""
     from datetime import datetime
-    now = datetime.now()
-    hour = now.hour
-    if 9 <= hour < 13:
-        period = "上午时段"
-    elif 13 <= hour < 18:
-        period = "下午时段"
-    elif 18 <= hour or hour < 3:
-        period = "晚上时段"
-    else:
-        period = "深夜时段"
+    from engine.constants import get_time_period
 
+    now = datetime.now()
+    period = get_time_period(now.hour) + "时段"
     current_time = f"现在是 {now.strftime('%Y-%m-%d %H:%M')}，属于{period}。"
 
     return SYSTEM_PROMPT.format(context=context, current_time=current_time)

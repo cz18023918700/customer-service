@@ -5,28 +5,15 @@
 """
 
 import logging
-import re
-from datetime import datetime
+
+from engine.constants import get_time_period
 
 logger = logging.getLogger(__name__)
 
 
-def _current_period() -> str:
-    """获取当前时段"""
-    hour = datetime.now().hour
-    if 9 <= hour < 13:
-        return "上午"
-    elif 13 <= hour < 18:
-        return "下午"
-    elif 18 <= hour or hour < 3:
-        return "晚上"
-    else:
-        return "深夜"
-
-
 def _price_by_period() -> dict:
     """当前时段的价格"""
-    period = _current_period()
+    period = get_time_period()
     if period in ("上午", "下午"):
         return {
             "period": period,

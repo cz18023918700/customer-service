@@ -4,6 +4,7 @@ import sqlite3
 import logging
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,6 @@ def get_db():
     """获取数据库连接（上下文管理器，自动关闭）"""
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
     finally:
@@ -26,6 +26,7 @@ def get_db():
 def init_db() -> None:
     """初始化数据库表"""
     with get_db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,8 +67,11 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id);
+            CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at);
             CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_msg_created ON messages(created_at);
+            CREATE INDEX IF NOT EXISTS idx_fb_created ON feedback(created_at);
         """)
         # 安全加列（已有表不报错）
         for col_sql in [
@@ -120,7 +124,7 @@ def get_conversation_stats() -> dict:
         total_msg = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         human_transfers = conn.execute("SELECT COUNT(*) FROM messages WHERE need_human = 1").fetchone()[0]
 
-        today_start = int(time.time()) - (int(time.time()) % 86400)
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         today_conv = conn.execute(
             "SELECT COUNT(*) FROM conversations WHERE created_at >= ?", (today_start,)
         ).fetchone()[0]
@@ -233,7 +237,6 @@ def get_human_transfer_list(limit: int = 20) -> list[dict]:
 
 def get_daily_trend(days: int = 7) -> list[dict]:
     """获取最近 N 天的每日趋势数据"""
-    from datetime import datetime, timedelta
     with get_db() as conn:
         result = []
         for i in range(days - 1, -1, -1):
@@ -290,7 +293,6 @@ def export_messages_csv() -> str:
     writer = csv.writer(output)
     writer.writerow(["session_id", "channel", "role", "content", "confidence", "need_human", "sources", "timestamp"])
     for r in rows:
-        from datetime import datetime
         ts = datetime.fromtimestamp(r["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
         writer.writerow([r["session_id"], r["channel"], r["role"], r["content"],
                          r["confidence"], r["need_human"], r["sources"], ts])
