@@ -15,11 +15,44 @@ from models.db import get_conversation_messages
 
 logger = logging.getLogger(__name__)
 
-# 内存缓存（热会话），冷数据从 DB 加载
-_sessions: dict[str, list[dict]] = defaultdict(list)
+# 内存缓存（热会话），带 TTL 过期清理
+# {session_id: {"msgs": [...], "last_active": timestamp}}
+_sessions: dict[str, dict] = {}
+SESSION_TTL = 1800  # 30 分钟无活动过期
+SESSION_CLEANUP_INTERVAL = 300  # 每 5 分钟清理一次
+_last_cleanup = 0.0
 
 # 默认追问建议（LLM 回复时用）
 DEFAULT_SUGGESTIONS = ["包厢价格是多少？", "怎么预约？", "有什么会员优惠？"]
+
+
+def _cleanup_expired_sessions() -> None:
+    """清理过期会话，防止内存泄漏"""
+    global _last_cleanup
+    now = time.time()
+    if now - _last_cleanup < SESSION_CLEANUP_INTERVAL:
+        return
+    _last_cleanup = now
+    expired = [sid for sid, s in _sessions.items() if now - s["last_active"] > SESSION_TTL]
+    for sid in expired:
+        del _sessions[sid]
+    if expired:
+        logger.info(f"清理 {len(expired)} 个过期会话，剩余 {len(_sessions)} 个")
+
+
+def _get_session_msgs(session_id: str) -> list[dict]:
+    """获取会话消息列表（带自动初始化和 DB 回退）"""
+    _cleanup_expired_sessions()
+
+    if session_id not in _sessions:
+        # 从 DB 加载冷数据
+        db_msgs = get_conversation_messages(session_id)
+        msgs = [{"role": m["role"], "content": m["content"], "ts": m["created_at"]} for m in db_msgs]
+        _sessions[session_id] = {"msgs": msgs, "last_active": time.time()}
+    else:
+        _sessions[session_id]["last_active"] = time.time()
+
+    return _sessions[session_id]["msgs"]
 
 
 def get_llm_client() -> OpenAI:
@@ -51,7 +84,7 @@ def chat(session_id: str, user_message: str) -> dict:
     faq_result = match_faq(user_message)
     if faq_result:
         now = time.time()
-        history = _sessions[session_id]
+        history = _get_session_msgs(session_id)
         history.append({"role": "user", "content": user_message, "ts": now})
         history.append({"role": "assistant", "content": faq_result["reply"], "ts": now})
         return {
@@ -77,11 +110,7 @@ def chat(session_id: str, user_message: str) -> dict:
     messages = [{"role": "system", "content": system_prompt}]
 
     # 加入历史对话（内存优先，没有则从 DB 加载）
-    history = _sessions[session_id]
-    if not history:
-        db_msgs = get_conversation_messages(session_id)
-        for m in db_msgs:
-            history.append({"role": m["role"], "content": m["content"], "ts": m["created_at"]})
+    history = _get_session_msgs(session_id)
 
     recent = history[-(config.MAX_HISTORY_TURNS * 2):]
     for h in recent:
@@ -97,6 +126,7 @@ def chat(session_id: str, user_message: str) -> dict:
             messages=messages,
             temperature=0.7,
             max_tokens=500,
+            timeout=30,
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
@@ -107,6 +137,8 @@ def chat(session_id: str, user_message: str) -> dict:
             "need_human": True,
             "sources": [],
             "confidence": 0.0,
+            "suggestions": DEFAULT_SUGGESTIONS,
+            "from_faq": False,
         }
 
     # 4. 解析 suggestions
@@ -131,8 +163,9 @@ def chat(session_id: str, user_message: str) -> dict:
     history.append({"role": "assistant", "content": reply, "ts": now})
 
     # 限制历史长度
-    if len(history) > config.MAX_HISTORY_TURNS * 2 + 10:
-        _sessions[session_id] = history[-(config.MAX_HISTORY_TURNS * 2):]
+    max_msgs = config.MAX_HISTORY_TURNS * 2
+    if len(history) > max_msgs + 10:
+        _sessions[session_id]["msgs"] = history[-max_msgs:]
 
     return {
         "reply": reply,
@@ -172,8 +205,6 @@ def clear_session(session_id: str) -> None:
 
 def get_session_history(session_id: str) -> list[dict]:
     """获取会话历史（内存 + DB 兜底）"""
-    history = _sessions.get(session_id, [])
-    if history:
-        return list(history)
-    # 内存没有则从 DB 加载
+    if session_id in _sessions:
+        return list(_sessions[session_id]["msgs"])
     return get_conversation_messages(session_id)

@@ -12,10 +12,11 @@
 
 import logging
 import sys
+import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, Depends, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -39,6 +40,18 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="静享时空 AI 客服", version="1.0.0")
 
+
+def verify_admin(request: Request) -> None:
+    """管理接口认证：ADMIN_TOKEN 非空时，要求 header 或 query 带 token"""
+    token = config.ADMIN_TOKEN
+    if not token:
+        return  # 未配置则不认证（本地开发模式）
+
+    # 从 header 或 query 获取 token
+    req_token = request.headers.get("X-Admin-Token", "") or request.query_params.get("token", "")
+    if req_token != token:
+        raise HTTPException(status_code=403, detail="管理权限不足")
+
 # 静态文件
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
@@ -48,12 +61,32 @@ if static_dir.exists():
 @app.on_event("startup")
 async def startup():
     """启动时初始化"""
+    # 配置校验
+    if not config.DEEPSEEK_API_KEY:
+        logger.error("缺少 DEEPSEEK_API_KEY，LLM 功能不可用")
+    if not config.WECOM_CORP_ID:
+        logger.warning("未配置企业微信，WeChat 接入不可用")
+    if not config.ADMIN_TOKEN:
+        logger.warning("未设置 ADMIN_TOKEN，管理后台无认证保护")
+
     logger.info("正在初始化数据库...")
     init_db()
     logger.info("正在加载知识库...")
     count = load_knowledge_base()
     logger.info(f"知识库加载完成，共 {count} 条文档片段")
     logger.info(f"静享时空 AI 客服启动完成 | http://localhost:{config.PORT}")
+    logger.info(f"管理后台: http://localhost:{config.PORT}/admin")
+
+
+@app.get("/health")
+async def health():
+    """健康检查"""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "has_deepseek": bool(config.DEEPSEEK_API_KEY),
+        "has_wecom": bool(config.WECOM_CORP_ID),
+    }
 
 
 # ============ Web 对话接口 ============
@@ -75,7 +108,7 @@ async def web_chat(request: Request):
     result = chat(session_id, user_message)
 
     # 保存 AI 回复
-    save_message(
+    msg_id = save_message(
         session_id, "assistant", result["reply"],
         confidence=result["confidence"],
         need_human=result["need_human"],
@@ -85,6 +118,7 @@ async def web_chat(request: Request):
 
     return {
         "reply": result["reply"],
+        "message_id": msg_id,
         "session_id": session_id,
         "need_human": result["need_human"],
         "confidence": result["confidence"],
@@ -168,18 +202,18 @@ async def api_feedback(request: Request):
     """满意度反馈"""
     data = await request.json()
     session_id = data.get("session_id", "")
-    message = data.get("message", "")
+    message_id = data.get("message_id", 0)
     rating = data.get("rating", 0)  # 1=👍, -1=👎
     comment = data.get("comment", "")
 
     if not session_id or not rating:
         return JSONResponse({"error": "参数缺失"}, status_code=400)
 
-    save_feedback(session_id, message, rating, comment)
+    save_feedback(session_id, int(message_id), rating, comment)
     return {"message": "感谢反馈"}
 
 
-@app.get("/api/stats")
+@app.get("/api/stats", dependencies=[Depends(verify_admin)])
 async def api_stats():
     """对话统计（含满意度）"""
     stats = get_conversation_stats()
@@ -187,39 +221,39 @@ async def api_stats():
     return stats
 
 
-@app.get("/api/history")
+@app.get("/api/history", dependencies=[Depends(verify_admin)])
 async def api_history(limit: int = Query(20)):
     """最近对话"""
     return get_recent_conversations(limit)
 
 
-@app.get("/api/session/{session_id}")
+@app.get("/api/session/{session_id}", dependencies=[Depends(verify_admin)])
 async def api_session(session_id: str):
     """获取某个会话的完整对话记录（从 DB）"""
     messages = get_conversation_messages(session_id)
     return {"session_id": session_id, "messages": messages}
 
 
-@app.get("/api/hot-questions")
+@app.get("/api/hot-questions", dependencies=[Depends(verify_admin)])
 async def api_hot_questions(limit: int = Query(10)):
     """高频问题统计"""
     return get_hot_questions(limit)
 
 
-@app.get("/api/human-transfers")
+@app.get("/api/human-transfers", dependencies=[Depends(verify_admin)])
 async def api_human_transfers(limit: int = Query(20)):
     """需要人工介入的对话"""
     return get_human_transfer_list(limit)
 
 
-@app.post("/api/reload-kb")
+@app.post("/api/reload-kb", dependencies=[Depends(verify_admin)])
 async def api_reload_kb():
     """重新加载知识库"""
     count = load_knowledge_base(force_reload=True)
     return {"message": f"知识库重新加载完成，共 {count} 条片段"}
 
 
-@app.get("/api/kb/list")
+@app.get("/api/kb/list", dependencies=[Depends(verify_admin)])
 async def api_kb_list():
     """列出知识库文档"""
     docs_dir = Path(config.KNOWLEDGE_DIR)
@@ -235,7 +269,7 @@ async def api_kb_list():
     return docs
 
 
-@app.get("/api/kb/{filename}")
+@app.get("/api/kb/{filename}", dependencies=[Depends(verify_admin)])
 async def api_kb_read(filename: str):
     """读取知识库文档内容"""
     file_path = Path(config.KNOWLEDGE_DIR) / filename
@@ -245,7 +279,7 @@ async def api_kb_read(filename: str):
     return {"filename": filename, "content": content}
 
 
-@app.put("/api/kb/{filename}")
+@app.put("/api/kb/{filename}", dependencies=[Depends(verify_admin)])
 async def api_kb_update(filename: str, request: Request):
     """更新知识库文档"""
     file_path = Path(config.KNOWLEDGE_DIR) / filename

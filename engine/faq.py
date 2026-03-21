@@ -4,8 +4,11 @@
 匹配失败 → 返回 None，走正常 RAG+LLM 流程
 """
 
+import logging
 import re
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _current_period() -> str:
@@ -176,20 +179,33 @@ def _hours(msg):
 
 
 def match_faq(user_message: str) -> dict | None:
-    """尝试匹配 FAQ
+    """加权匹配 FAQ — 选关键词覆盖率最高的规则
 
     Returns:
         {"reply": str, "suggestions": list[str]} 或 None
     """
     msg = user_message.lower().strip()
 
+    best_match = None
+    best_score = 0.0
+
     for keywords, handler, suggestions in FAQ_RULES:
-        # 任意一个关键词命中就触发
-        if any(kw in msg for kw in keywords):
-            try:
-                reply = handler(msg)
-                return {"reply": reply, "suggestions": suggestions}
-            except Exception:
-                return None
+        matched = sum(1 for kw in keywords if kw in msg)
+        if matched == 0:
+            continue
+        # 覆盖率 = 命中数 / 关键词总数
+        score = matched / len(keywords)
+        if score > best_score:
+            best_score = score
+            best_match = (handler, suggestions)
+
+    # 至少命中一个关键词才触发
+    if best_match and best_score > 0:
+        try:
+            reply = best_match[0](msg)
+            return {"reply": reply, "suggestions": best_match[1]}
+        except Exception as e:
+            logger.warning(f"FAQ handler 异常: {e}")
+            return None
 
     return None

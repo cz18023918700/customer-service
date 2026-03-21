@@ -44,5 +44,8 @@ class Config:
     # 转人工通知（企微群机器人 webhook URL）
     NOTIFY_WEBHOOK: str = os.getenv("NOTIFY_WEBHOOK", "")
 
+    # 管理后台密码（为空则不启用认证，方便本地开发）
+    ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
+
 
 config = Config()

@@ -6,7 +6,7 @@
 import base64
 import hashlib
 import logging
-import socket
+import os
 import struct
 import time
 
@@ -71,7 +71,7 @@ class WXBizMsgCrypt:
         """AES 加密"""
         text_bytes = text.encode("utf-8")
         # 16字节随机字符串 + 4字节内容长度(网络序) + 内容 + corp_id
-        rand_bytes = socket.inet_aton("0.0.0.0") * 4  # 简化的随机字节
+        rand_bytes = os.urandom(16)
         content = rand_bytes + struct.pack("!I", len(text_bytes)) + text_bytes + self.corp_id.encode("utf-8")
         # PKCS7 填充
         pad_len = 32 - (len(content) % 32)

@@ -140,6 +140,7 @@ function addMessage(role, content, meta) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
     const avatar = role === 'user' ? '😊' : '🎵';
+    const msgId = (meta && meta.message_id) ? meta.message_id : 0;
 
     let footerHtml = '';
     if (role === 'assistant' && meta) {
@@ -148,8 +149,8 @@ function addMessage(role, content, meta) {
         if (meta.need_human) parts.push('<span class="meta-text" style="color:#e74c3c">⚠️ 已通知人工客服</span>');
 
         footerHtml = `<div class="msg-footer">
-            <button class="feedback-btn" onclick="sendFeedback(this, 1, '${escapeAttr(content)}')">👍</button>
-            <button class="feedback-btn" onclick="sendFeedback(this, -1, '${escapeAttr(content)}')">👎</button>
+            <button class="feedback-btn" onclick="sendFeedback(this, 1, ${msgId})">👍</button>
+            <button class="feedback-btn" onclick="sendFeedback(this, -1, ${msgId})">👎</button>
             ${parts.join('')}
         </div>`;
     }
@@ -223,6 +224,7 @@ async function sendMsg() {
         removeTyping();
         lastReply = data.reply;
         addMessage('assistant', data.reply, {
+            message_id: data.message_id,
             need_human: data.need_human,
             confidence: data.confidence,
             from_faq: data.from_faq,
@@ -241,22 +243,27 @@ function sendQuick(text) {
     sendMsg();
 }
 
-async function sendFeedback(btn, rating, msgSnippet) {
+async function sendFeedback(btn, rating, messageId) {
     const row = btn.parentElement;
     row.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('voted'));
     btn.classList.add('voted');
 
     try {
-        await fetch('/api/feedback', {
+        const resp = await fetch('/api/feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session_id: sessionId,
-                message: msgSnippet.slice(0, 200),
+                message_id: messageId,
                 rating: rating,
             }),
         });
-    } catch (e) { /* 静默 */ }
+        if (!resp.ok) {
+            btn.title = '反馈失败';
+        }
+    } catch (e) {
+        btn.title = '网络错误';
+    }
 }
 
 input.focus();

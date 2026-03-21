@@ -183,18 +183,11 @@ def get_hot_questions(limit: int = 10) -> list[dict]:
         conn.close()
 
 
-def save_feedback(session_id: str, message_content: str, rating: int, comment: str = "") -> int:
+def save_feedback(session_id: str, message_id: int, rating: int, comment: str = "") -> int:
     """保存满意度反馈 (rating: 1=👍, -1=👎)"""
     now = time.time()
     conn = get_db()
     try:
-        # 找到对应的消息 ID
-        row = conn.execute(
-            "SELECT id FROM messages WHERE session_id = ? AND content = ? ORDER BY created_at DESC LIMIT 1",
-            (session_id, message_content)
-        ).fetchone()
-        message_id = row["id"] if row else 0
-
         cursor = conn.execute(
             "INSERT INTO feedback (session_id, message_id, rating, comment, created_at) VALUES (?, ?, ?, ?, ?)",
             (session_id, message_id, rating, comment, now)

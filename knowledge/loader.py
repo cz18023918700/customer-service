@@ -222,8 +222,9 @@ def query_knowledge(question: str, top_k: int = 0) -> list[dict]:
     )
     if results and results["documents"]:
         for i, doc in enumerate(results["documents"][0]):
-            distance = results["distances"][0][i] if results["distances"] else 1.0
-            score = 1.0 - distance / 2.0
+            distance = results["distances"][0][i] if results["distances"] else 2.0
+            # cosine distance → similarity: 距离0=完全匹配, 距离2=完全相反
+            score = max(0.0, 1.0 - distance)
             source = results["metadatas"][0][i].get("source", "unknown") if results["metadatas"] else "unknown"
             if score >= config.RAG_SCORE_THRESHOLD:
                 vector_docs.append({
