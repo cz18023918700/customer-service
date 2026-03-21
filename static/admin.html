@@ -112,7 +112,7 @@ tr:hover td { background: #fafbfc; }
 <body>
 
 <div class="topbar">
-    <h1>静享时空 · 客服管理后台</h1>
+    <h1>静享时空 · 客服管理后台 <span id="pendingBadge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:2px 8px;font-size:11px;margin-left:8px;animation:fadeIn .3s"></span></h1>
     <a href="/">← 返回客服测试</a>
 </div>
 
@@ -134,6 +134,10 @@ tr:hover td { background: #fafbfc; }
             <div class="card">
                 <h3>7日趋势（对话量）</h3>
                 <div class="trend-chart" id="trendChart"></div>
+            </div>
+            <div class="card">
+                <h3>高峰时段分布</h3>
+                <div class="trend-chart" id="peakChart"></div>
             </div>
             <div class="card">
                 <h3>最近对话 <span style="font-size:11px;color:#999;margin-left:8px">每30秒自动刷新</span></h3>
@@ -234,11 +238,21 @@ function fmtTime(ts) {
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '...' : (s || '-'); }
 
 async function loadDashboard() {
-    const [stats, convs, trend] = await Promise.all([
+    const [stats, convs, trend, peak] = await Promise.all([
         fetch('/api/stats').then(r => r.json()),
         fetch('/api/history?limit=10').then(r => r.json()),
         fetch('/api/trend?days=7').then(r => r.json()),
+        fetch('/api/peak-hours').then(r => r.json()),
     ]);
+
+    // 待处理转人工徽章
+    const badge = document.getElementById('pendingBadge');
+    if (stats.pending_human > 0) {
+        badge.textContent = stats.pending_human + ' 条待处理';
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
 
     // 趋势图
     const maxConvs = Math.max(...trend.map(d => d.conversations), 1);
@@ -250,6 +264,18 @@ async function loadDashboard() {
             <div class="label">${d.date}</div>
         </div>`;
     }).join('');
+
+    // 高峰时段图
+    const maxPeak = Math.max(...peak.map(d => d.count), 1);
+    document.getElementById('peakChart').innerHTML = peak.map(d => {
+        const h = Math.max(2, (d.count / maxPeak) * 100);
+        const color = d.count === maxPeak && d.count > 0 ? 'background:linear-gradient(180deg,#e74c3c,#c0392b)' : '';
+        return `<div class="trend-bar">
+            <div class="val">${d.count || ''}</div>
+            <div class="bar" style="height:${h}px;${color}"></div>
+            <div class="label">${d.hour}时</div>
+        </div>`;
+    }).join('');
     const fb = stats.feedback || {};
     const totalReplies = (stats.faq_replies || 0) + (stats.llm_replies || 0);
     const faqRate = totalReplies ? Math.round((stats.faq_replies || 0) / totalReplies * 100) : 0;
@@ -259,6 +285,7 @@ async function loadDashboard() {
         <div class="stat-card"><div class="label">转人工次数</div><div class="value">${stats.human_transfers}</div></div>
         <div class="stat-card"><div class="label">满意度</div><div class="value">${fb.satisfaction_rate || 0}%</div><div class="sub">👍${fb.positive||0} 👎${fb.negative||0}</div></div>
         <div class="stat-card"><div class="label">FAQ秒回率</div><div class="value">${faqRate}%</div><div class="sub">FAQ ${stats.faq_replies||0} / LLM ${stats.llm_replies||0}</div></div>
+        <div class="stat-card"><div class="label">当前在线</div><div class="value">${stats.active_sessions || 0}</div><div class="sub">${stats.pending_human ? '⚠️ '+stats.pending_human+'条待处理' : '无待处理'}</div></div>
         <div class="stat-card"><div class="label">平均响应</div><div class="value">${stats.response_time ? stats.response_time.avg_ms : 0}ms</div><div class="sub">最快 ${stats.response_time?stats.response_time.min_ms:0}ms</div></div>
         <div class="stat-card"><div class="label">导出数据</div><div class="value" style="font-size:14px"><a href="/api/export-csv" class="btn btn-primary" style="text-decoration:none;color:white">下载 CSV</a></div></div>
     `;

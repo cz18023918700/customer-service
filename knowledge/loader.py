@@ -10,17 +10,36 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+_chroma_client: chromadb.ClientAPI | None = None
+_chroma_collection: chromadb.Collection | None = None
+
+
 def get_chroma_client() -> chromadb.ClientAPI:
-    """获取 ChromaDB 客户端"""
-    return chromadb.PersistentClient(path=config.CHROMA_PERSIST_DIR)
+    """获取 ChromaDB 客户端（单例，避免重复初始化）"""
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = chromadb.PersistentClient(path=config.CHROMA_PERSIST_DIR)
+    return _chroma_client
 
 
-def get_collection(client: chromadb.ClientAPI) -> chromadb.Collection:
-    """获取或创建知识库 collection"""
-    return client.get_or_create_collection(
-        name="jinxiang_kb",
-        metadata={"hnsw:space": "cosine"},
-    )
+def get_collection(client: chromadb.ClientAPI | None = None) -> chromadb.Collection:
+    """获取 collection（单例）"""
+    global _chroma_collection
+    if _chroma_collection is None:
+        if client is None:
+            client = get_chroma_client()
+        _chroma_collection = client.get_or_create_collection(
+            name="jinxiang_kb",
+            metadata={"hnsw:space": "cosine"},
+        )
+    return _chroma_collection
+
+
+def reset_chroma_cache():
+    """重载知识库时重置缓存"""
+    global _chroma_client, _chroma_collection
+    _chroma_client = None
+    _chroma_collection = None
 
 
 def split_document(text: str, doc_title: str = "", max_chunk_size: int = 800) -> list[str]:
@@ -85,6 +104,9 @@ def load_knowledge_base(force_reload: bool = False) -> int:
     Returns:
         加载的文档片段数量
     """
+    if force_reload:
+        reset_chroma_cache()
+
     client = get_chroma_client()
 
     if force_reload:
@@ -92,6 +114,7 @@ def load_knowledge_base(force_reload: bool = False) -> int:
             client.delete_collection("jinxiang_kb")
         except Exception:
             logger.warning("删除旧 collection 失败，可能不存在")
+        reset_chroma_cache()  # 删除后重置 collection 缓存
 
     collection = get_collection(client)
 

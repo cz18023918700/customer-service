@@ -350,3 +350,54 @@ def get_response_time_stats() -> dict:
                 "total": row["total"],
             }
         return {"avg_ms": 0, "min_ms": 0, "max_ms": 0, "total": 0}
+
+
+def get_peak_hours() -> list[dict]:
+    """统计每小时的对话量（发现高峰时段）"""
+    from datetime import datetime
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT CAST(((created_at + 28800) % 86400) / 3600 AS INTEGER) as hour,
+                   COUNT(*) as cnt
+            FROM conversations
+            GROUP BY hour
+            ORDER BY hour
+        """).fetchall()
+        # 补齐 24 小时
+        hour_map = {r["hour"]: r["cnt"] for r in rows}
+        return [{"hour": h, "count": hour_map.get(h, 0)} for h in range(24)]
+
+
+def get_active_sessions_count() -> int:
+    """获取活跃会话数（最近30分钟有消息的）"""
+    cutoff = time.time() - 1800
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE status = 'active' AND updated_at >= ?",
+            (cutoff,)
+        ).fetchone()[0]
+
+
+def get_pending_human_count() -> int:
+    """获取未处理的转人工数量"""
+    with get_db() as conn:
+        return conn.execute("""
+            SELECT COUNT(DISTINCT session_id) FROM messages
+            WHERE need_human = 1
+            AND session_id NOT IN (
+                SELECT session_id FROM messages
+                WHERE content LIKE '%已处理%' OR content LIKE '%已解决%'
+            )
+        """).fetchone()[0]
+
+
+def close_stale_conversations(hours: int = 2) -> int:
+    """关闭超过 N 小时无活动的会话"""
+    cutoff = time.time() - hours * 3600
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE conversations SET status = 'closed' WHERE status = 'active' AND updated_at < ?",
+            (cutoff,)
+        )
+        conn.commit()
+        return cursor.rowcount

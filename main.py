@@ -29,6 +29,8 @@ from models.db import (
     get_conversation_messages, get_hot_questions, get_human_transfer_list,
     save_feedback, get_feedback_stats, export_messages_csv, get_daily_trend,
     save_faq_miss, get_faq_misses, search_conversations, get_response_time_stats,
+    get_peak_hours, get_active_sessions_count, get_pending_human_count,
+    close_stale_conversations,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -97,6 +99,11 @@ async def startup():
     logger.info("正在加载知识库...")
     count = load_knowledge_base()
     logger.info(f"知识库加载完成，共 {count} 条文档片段")
+
+    # 清理过期会话
+    closed = close_stale_conversations(hours=2)
+    if closed:
+        logger.info(f"清理 {closed} 个过期会话")
 
     # 启动自检
     _self_check()
@@ -288,6 +295,8 @@ async def api_stats():
     stats = get_conversation_stats()
     stats["feedback"] = get_feedback_stats()
     stats["response_time"] = get_response_time_stats()
+    stats["active_sessions"] = get_active_sessions_count()
+    stats["pending_human"] = get_pending_human_count()
     return stats
 
 
@@ -334,6 +343,21 @@ async def api_search(q: str = Query(""), limit: int = Query(20)):
 async def api_response_time():
     """响应时间统计"""
     return get_response_time_stats()
+
+
+@app.get("/api/peak-hours", dependencies=[Depends(verify_admin)])
+async def api_peak_hours():
+    """高峰时段分析"""
+    return get_peak_hours()
+
+
+@app.get("/api/live")
+async def api_live():
+    """实时状态（活跃会话 + 待处理转人工）"""
+    return {
+        "active_sessions": get_active_sessions_count(),
+        "pending_human": get_pending_human_count(),
+    }
 
 
 @app.get("/api/export-csv", dependencies=[Depends(verify_admin)])
