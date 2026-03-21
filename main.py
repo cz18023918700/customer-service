@@ -25,6 +25,7 @@ from knowledge.loader import load_knowledge_base
 from models.db import (
     init_db, save_message, get_conversation_stats, get_recent_conversations,
     get_conversation_messages, get_hot_questions, get_human_transfer_list,
+    save_feedback, get_feedback_stats,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -88,6 +89,8 @@ async def web_chat(request: Request):
         "need_human": result["need_human"],
         "confidence": result["confidence"],
         "sources": result["sources"],
+        "suggestions": result.get("suggestions", []),
+        "from_faq": result.get("from_faq", False),
     }
 
 
@@ -160,10 +163,28 @@ async def wecom_message(
 
 # ============ 管理接口 ============
 
+@app.post("/api/feedback")
+async def api_feedback(request: Request):
+    """满意度反馈"""
+    data = await request.json()
+    session_id = data.get("session_id", "")
+    message = data.get("message", "")
+    rating = data.get("rating", 0)  # 1=👍, -1=👎
+    comment = data.get("comment", "")
+
+    if not session_id or not rating:
+        return JSONResponse({"error": "参数缺失"}, status_code=400)
+
+    save_feedback(session_id, message, rating, comment)
+    return {"message": "感谢反馈"}
+
+
 @app.get("/api/stats")
 async def api_stats():
-    """对话统计"""
-    return get_conversation_stats()
+    """对话统计（含满意度）"""
+    stats = get_conversation_stats()
+    stats["feedback"] = get_feedback_stats()
+    return stats
 
 
 @app.get("/api/history")

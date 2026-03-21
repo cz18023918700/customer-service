@@ -3,11 +3,13 @@
 import logging
 import time
 from collections import defaultdict
+from datetime import datetime
 
 from openai import OpenAI
 
 from config import config
 from engine.prompt import build_system_prompt
+from engine.faq import match_faq
 from knowledge.loader import query_knowledge
 from models.db import get_conversation_messages
 
@@ -15,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # 内存缓存（热会话），冷数据从 DB 加载
 _sessions: dict[str, list[dict]] = defaultdict(list)
+
+# 默认追问建议（LLM 回复时用）
+DEFAULT_SUGGESTIONS = ["包厢价格是多少？", "怎么预约？", "有什么会员优惠？"]
 
 
 def get_llm_client() -> OpenAI:
@@ -34,12 +39,30 @@ def chat(session_id: str, user_message: str) -> dict:
 
     Returns:
         {
-            "reply": str,          # AI 回复内容
-            "need_human": bool,    # 是否需要转人工
-            "sources": list[str],  # 引用的知识库来源
-            "confidence": float,   # 置信度 0-1
+            "reply": str,           # AI 回复内容
+            "need_human": bool,     # 是否需要转人工
+            "sources": list[str],   # 引用的知识库来源
+            "confidence": float,    # 置信度 0-1
+            "suggestions": list,    # 推荐追问
+            "from_faq": bool,       # 是否来自 FAQ 快速回复
         }
     """
+    # 0. FAQ 快速匹配（秒回，不走 LLM）
+    faq_result = match_faq(user_message)
+    if faq_result:
+        now = time.time()
+        history = _sessions[session_id]
+        history.append({"role": "user", "content": user_message, "ts": now})
+        history.append({"role": "assistant", "content": faq_result["reply"], "ts": now})
+        return {
+            "reply": faq_result["reply"],
+            "need_human": False,
+            "sources": ["FAQ"],
+            "confidence": 1.0,
+            "suggestions": faq_result.get("suggestions", []),
+            "from_faq": True,
+        }
+
     # 1. RAG 检索
     rag_results = query_knowledge(user_message)
     context = "\n\n".join(
@@ -86,13 +109,23 @@ def chat(session_id: str, user_message: str) -> dict:
             "confidence": 0.0,
         }
 
-    # 4. 判断是否需要转人工
+    # 4. 解析 suggestions
+    suggestions = DEFAULT_SUGGESTIONS
+    if "---suggestions---" in reply:
+        parts = reply.split("---suggestions---", 1)
+        reply = parts[0].strip()
+        raw_suggestions = parts[1].strip().split("\n")
+        parsed = [s.strip() for s in raw_suggestions if s.strip()]
+        if parsed:
+            suggestions = parsed[:3]
+
+    # 5. 判断是否需要转人工
     need_human = _check_need_human(user_message, reply, avg_score)
 
     if need_human:
         reply += "\n\n💬 我已帮你记录，工作人员会尽快联系你处理~"
 
-    # 5. 保存对话历史
+    # 6. 保存对话历史
     now = time.time()
     history.append({"role": "user", "content": user_message, "ts": now})
     history.append({"role": "assistant", "content": reply, "ts": now})
@@ -106,6 +139,8 @@ def chat(session_id: str, user_message: str) -> dict:
         "need_human": need_human,
         "sources": sources,
         "confidence": round(avg_score, 2),
+        "suggestions": suggestions,
+        "from_faq": False,
     }
 
 

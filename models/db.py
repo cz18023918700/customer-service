@@ -183,6 +183,45 @@ def get_hot_questions(limit: int = 10) -> list[dict]:
         conn.close()
 
 
+def save_feedback(session_id: str, message_content: str, rating: int, comment: str = "") -> int:
+    """保存满意度反馈 (rating: 1=👍, -1=👎)"""
+    now = time.time()
+    conn = get_db()
+    try:
+        # 找到对应的消息 ID
+        row = conn.execute(
+            "SELECT id FROM messages WHERE session_id = ? AND content = ? ORDER BY created_at DESC LIMIT 1",
+            (session_id, message_content)
+        ).fetchone()
+        message_id = row["id"] if row else 0
+
+        cursor = conn.execute(
+            "INSERT INTO feedback (session_id, message_id, rating, comment, created_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, message_id, rating, comment, now)
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_feedback_stats() -> dict:
+    """获取反馈统计"""
+    conn = get_db()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+        positive = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating > 0").fetchone()[0]
+        negative = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating < 0").fetchone()[0]
+        return {
+            "total": total,
+            "positive": positive,
+            "negative": negative,
+            "satisfaction_rate": round(positive / total * 100, 1) if total > 0 else 0,
+        }
+    finally:
+        conn.close()
+
+
 def get_human_transfer_list(limit: int = 20) -> list[dict]:
     """获取需要人工介入的对话"""
     conn = get_db()

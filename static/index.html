@@ -10,11 +10,12 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 
 .header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white; padding: 16px 20px; text-align: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    color: white; padding: 14px 20px; text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15); flex-shrink: 0;
 }
 .header h1 { font-size: 18px; font-weight: 600; }
 .header p { font-size: 12px; opacity: .8; margin-top: 4px; }
+.header a { color: rgba(255,255,255,.7); font-size: 11px; text-decoration: none; position: absolute; right: 16px; top: 16px; }
 
 .chat-container {
     flex: 1; overflow-y: auto; padding: 16px; display: flex;
@@ -22,10 +23,7 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     width: 100%; margin: 0 auto;
 }
 
-.message {
-    display: flex; gap: 10px; max-width: 85%;
-    animation: fadeIn .3s ease;
-}
+.message { display: flex; gap: 10px; max-width: 85%; animation: fadeIn .3s ease; }
 .message.user { align-self: flex-end; flex-direction: row-reverse; }
 .message.assistant { align-self: flex-start; }
 
@@ -41,20 +39,37 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     padding: 10px 14px; border-radius: 16px; font-size: 14px;
     line-height: 1.6; word-break: break-word; white-space: pre-wrap;
 }
-.message.user .bubble {
-    background: #667eea; color: white; border-bottom-right-radius: 4px;
-}
+.message.user .bubble { background: #667eea; color: white; border-bottom-right-radius: 4px; }
 .message.assistant .bubble {
     background: white; color: #333; border-bottom-left-radius: 4px;
     box-shadow: 0 1px 3px rgba(0,0,0,.08);
 }
+.bubble strong { font-weight: 600; }
 
-.meta { font-size: 11px; color: #999; margin-top: 4px; text-align: right; }
-.meta.human-tag { color: #e74c3c; }
+.msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.feedback-btn {
+    background: none; border: 1px solid #ddd; border-radius: 12px; padding: 2px 10px;
+    font-size: 14px; cursor: pointer; transition: all .15s; color: #999;
+}
+.feedback-btn:hover { border-color: #667eea; color: #667eea; }
+.feedback-btn.voted { border-color: #667eea; background: #f0ecff; color: #667eea; pointer-events: none; }
+.faq-tag { font-size: 10px; background: #e8f5e9; color: #27ae60; padding: 1px 6px; border-radius: 8px; }
+.meta-text { font-size: 11px; color: #999; }
+
+.suggestions {
+    display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0 8px 46px;
+    max-width: 800px; width: 100%; animation: fadeIn .3s ease;
+}
+.suggest-btn {
+    background: white; border: 1px solid #e0e0e0; border-radius: 16px;
+    padding: 6px 14px; font-size: 12px; color: #667eea; cursor: pointer;
+    transition: all .15s; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.suggest-btn:hover { border-color: #667eea; background: #f8f7ff; }
 
 .input-area {
     background: white; padding: 12px 16px; border-top: 1px solid #e8e8e8;
-    display: flex; gap: 10px; max-width: 800px; width: 100%; margin: 0 auto;
+    display: flex; gap: 10px; max-width: 800px; width: 100%; margin: 0 auto; flex-shrink: 0;
 }
 .input-area input {
     flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 10px 16px;
@@ -77,26 +92,16 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .typing span:nth-child(2) { animation-delay: .2s; }
 .typing span:nth-child(3) { animation-delay: .4s; }
 
-.quick-actions {
-    display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 16px;
-    max-width: 800px; width: 100%; margin: 0 auto;
-}
-.quick-btn {
-    background: white; border: 1px solid #e0e0e0; border-radius: 16px;
-    padding: 6px 14px; font-size: 12px; color: #666; cursor: pointer;
-    transition: all .2s;
-}
-.quick-btn:hover { border-color: #667eea; color: #667eea; background: #f8f7ff; }
-
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes bounce { to { transform: translateY(-6px); } }
 </style>
 </head>
 <body>
 
-<div class="header">
+<div class="header" style="position:relative">
     <h1>🎤 静享时空 · AI 客服</h1>
     <p>24小时在线，有什么可以帮到你？</p>
+    <a href="/admin">管理后台 →</a>
 </div>
 
 <div class="chat-container" id="chatContainer">
@@ -109,13 +114,13 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     </div>
 </div>
 
-<div class="quick-actions">
-    <button class="quick-btn" onclick="sendQuick('大包厢晚上多少钱？')">💰 包厢价格</button>
-    <button class="quick-btn" onclick="sendQuick('怎么预约包厢？')">📱 怎么预约</button>
-    <button class="quick-btn" onclick="sendQuick('有什么会员优惠？')">🎁 会员福利</button>
-    <button class="quick-btn" onclick="sendQuick('第一次来，怎么使用？')">🆕 新手指南</button>
-    <button class="quick-btn" onclick="sendQuick('店在哪里？怎么去？')">📍 位置导航</button>
-    <button class="quick-btn" onclick="sendQuick('3个人适合什么包厢？')">👥 推荐房型</button>
+<div id="suggestionsArea" class="suggestions">
+    <button class="suggest-btn" onclick="sendQuick('大包厢晚上多少钱？')">💰 包厢价格</button>
+    <button class="suggest-btn" onclick="sendQuick('怎么预约包厢？')">📱 怎么预约</button>
+    <button class="suggest-btn" onclick="sendQuick('有什么会员优惠？')">🎁 会员福利</button>
+    <button class="suggest-btn" onclick="sendQuick('第一次来，怎么使用？')">🆕 新手指南</button>
+    <button class="suggest-btn" onclick="sendQuick('店在哪里？怎么去？')">📍 位置导航</button>
+    <button class="suggest-btn" onclick="sendQuick('3个人适合什么包厢？')">👥 推荐房型</button>
 </div>
 
 <div class="input-area">
@@ -125,24 +130,35 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 
 <script>
 const container = document.getElementById('chatContainer');
+const suggestionsArea = document.getElementById('suggestionsArea');
 const input = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
 let sessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+let lastReply = '';
 
 function addMessage(role, content, meta) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
     const avatar = role === 'user' ? '😊' : '🎵';
-    let metaHtml = '';
-    if (meta) {
-        if (meta.need_human) metaHtml = '<div class="meta human-tag">⚠️ 已通知人工客服</div>';
-        else if (meta.confidence) metaHtml = `<div class="meta">置信度: ${(meta.confidence * 100).toFixed(0)}%</div>`;
+
+    let footerHtml = '';
+    if (role === 'assistant' && meta) {
+        const parts = [];
+        if (meta.from_faq) parts.push('<span class="faq-tag">秒回</span>');
+        if (meta.need_human) parts.push('<span class="meta-text" style="color:#e74c3c">⚠️ 已通知人工客服</span>');
+
+        footerHtml = `<div class="msg-footer">
+            <button class="feedback-btn" onclick="sendFeedback(this, 1, '${escapeAttr(content)}')">👍</button>
+            <button class="feedback-btn" onclick="sendFeedback(this, -1, '${escapeAttr(content)}')">👎</button>
+            ${parts.join('')}
+        </div>`;
     }
+
     div.innerHTML = `
         <div class="avatar">${avatar}</div>
-        <div>
-            <div class="bubble">${escapeHtml(content)}</div>
-            ${metaHtml}
+        <div style="flex:1;min-width:0">
+            <div class="bubble">${formatReply(content)}</div>
+            ${footerHtml}
         </div>
     `;
     container.appendChild(div);
@@ -150,21 +166,11 @@ function addMessage(role, content, meta) {
     return div;
 }
 
-function addTyping() {
-    const div = document.createElement('div');
-    div.className = 'message assistant';
-    div.id = 'typing';
-    div.innerHTML = `
-        <div class="avatar">🎵</div>
-        <div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div></div>
-    `;
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-}
-
-function removeTyping() {
-    const el = document.getElementById('typing');
-    if (el) el.remove();
+function formatReply(text) {
+    // Simple markdown: **bold**, \n preserved via pre-wrap
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    return html;
 }
 
 function escapeHtml(s) {
@@ -173,11 +179,36 @@ function escapeHtml(s) {
     return d.innerHTML;
 }
 
+function escapeAttr(s) {
+    return s.replace(/'/g, "\\'").replace(/\n/g, "\\n").slice(0, 100);
+}
+
+function updateSuggestions(suggestions) {
+    if (!suggestions || suggestions.length === 0) {
+        suggestionsArea.innerHTML = '';
+        return;
+    }
+    suggestionsArea.innerHTML = suggestions.map(s =>
+        `<button class="suggest-btn" onclick="sendQuick('${escapeAttr(s)}')">${escapeHtml(s)}</button>`
+    ).join('');
+}
+
+function addTyping() {
+    const div = document.createElement('div');
+    div.className = 'message assistant'; div.id = 'typing';
+    div.innerHTML = `<div class="avatar">🎵</div><div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div></div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function removeTyping() { const el = document.getElementById('typing'); if (el) el.remove(); }
+
 async function sendMsg() {
     const msg = input.value.trim();
     if (!msg) return;
     input.value = '';
     sendBtn.disabled = true;
+    suggestionsArea.innerHTML = '';
 
     addMessage('user', msg);
     addTyping();
@@ -190,10 +221,13 @@ async function sendMsg() {
         });
         const data = await resp.json();
         removeTyping();
+        lastReply = data.reply;
         addMessage('assistant', data.reply, {
             need_human: data.need_human,
             confidence: data.confidence,
+            from_faq: data.from_faq,
         });
+        updateSuggestions(data.suggestions);
     } catch (e) {
         removeTyping();
         addMessage('assistant', '网络出了点问题，请稍后再试 🙏');
@@ -205,6 +239,24 @@ async function sendMsg() {
 function sendQuick(text) {
     input.value = text;
     sendMsg();
+}
+
+async function sendFeedback(btn, rating, msgSnippet) {
+    const row = btn.parentElement;
+    row.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('voted'));
+    btn.classList.add('voted');
+
+    try {
+        await fetch('/api/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                message: msgSnippet.slice(0, 200),
+                rating: rating,
+            }),
+        });
+    } catch (e) { /* 静默 */ }
 }
 
 input.focus();

@@ -29,13 +29,38 @@ SYSTEM_PROMPT = """你是「静享时空」无人休闲馆的 AI 客服小助手
 - 推荐时优先推荐当前时段性价比高的选项
 - 回答要简洁，不要长篇大论
 
+## 当前时间
+{current_time}
+根据时间推荐对应时段的价格（上午9-12:30 / 下午13-18 / 晚上19-03）。
+
 ## 参考信息
 以下是从知识库检索到的相关信息，请基于这些信息回答：
 {context}
 
-如果以上信息不足以回答用户的问题，请诚实告知并建议联系人工客服。"""
+如果以上信息不足以回答用户的问题，请诚实告知并建议联系人工客服。
+
+## 回复格式
+回复完问题后，在最后另起一行用"---suggestions---"分隔，然后给出2-3个用户可能想继续问的问题，用换行分隔。例如：
+这是我的回答内容
+---suggestions---
+还有什么其他问题吗
+大包厢多少钱"""
 
 
 def build_system_prompt(context: str) -> str:
-    """构建系统提示词，注入 RAG 上下文"""
-    return SYSTEM_PROMPT.format(context=context)
+    """构建系统提示词，注入 RAG 上下文和当前时间"""
+    from datetime import datetime
+    now = datetime.now()
+    hour = now.hour
+    if 9 <= hour < 13:
+        period = "上午时段"
+    elif 13 <= hour < 18:
+        period = "下午时段"
+    elif 18 <= hour or hour < 3:
+        period = "晚上时段"
+    else:
+        period = "深夜时段"
+
+    current_time = f"现在是 {now.strftime('%Y-%m-%d %H:%M')}，属于{period}。"
+
+    return SYSTEM_PROMPT.format(context=context, current_time=current_time)
