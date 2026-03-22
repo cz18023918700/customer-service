@@ -10,6 +10,7 @@ from config import config
 from engine.constants import SUGGESTIONS_SEPARATOR, FAULT_KEYWORDS
 from engine.prompt import build_system_prompt
 from engine.faq import match_faq
+from engine.safety import sanitize_input, check_output_safety
 from knowledge.loader import query_knowledge
 from models.db import get_conversation_messages
 
@@ -143,6 +144,11 @@ def _check_need_human(user_msg: str, ai_reply: str, rag_score: float) -> bool:
 def chat(session_id: str, user_message: str) -> dict:
     """非流式对话"""
     start_time = time.time()
+    user_message = sanitize_input(user_message)
+    if not user_message:
+        return {"reply": "请输入您的问题~", "need_human": False, "sources": [],
+                "confidence": 1.0, "suggestions": DEFAULT_SUGGESTIONS,
+                "from_faq": False, "elapsed_ms": 0}
     ctx = _prepare_context(session_id, user_message)
 
     # FAQ 秒回
@@ -179,6 +185,7 @@ def chat(session_id: str, user_message: str) -> dict:
         }
 
     reply, suggestions = _parse_reply(raw_reply)
+    reply = check_output_safety(reply)  # 输出安全检查
     need_human = _check_need_human(user_message, reply, ctx["avg_score"])
     if need_human:
         reply += "\n\n💬 我已帮你记录，工作人员会尽快联系你处理~"
@@ -197,6 +204,11 @@ def chat(session_id: str, user_message: str) -> dict:
 def chat_stream(session_id: str, user_message: str):
     """流式对话 — 返回 generator"""
     start_time = time.time()
+    user_message = sanitize_input(user_message)
+    if not user_message:
+        yield json.dumps({"type": "faq", "reply": "请输入您的问题~",
+                          "suggestions": DEFAULT_SUGGESTIONS, "need_human": False}, ensure_ascii=False)
+        return
     ctx = _prepare_context(session_id, user_message)
 
     # FAQ 秒回
@@ -229,6 +241,7 @@ def chat_stream(session_id: str, user_message: str):
         yield json.dumps({"type": "chunk", "content": full_reply}, ensure_ascii=False)
 
     reply, suggestions = _parse_reply(full_reply)
+    reply = check_output_safety(reply)  # 输出安全检查
     need_human = _check_need_human(user_message, reply, ctx["avg_score"])
     _finalize(session_id, ctx["history"], user_message, reply)
     elapsed_ms = int((time.time() - start_time) * 1000)
