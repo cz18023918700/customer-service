@@ -643,14 +643,15 @@ async def api_greeting(session_id: str = Query("")):
     from engine.constants import get_greeting_prefix
     period_greeting = get_greeting_prefix()
 
-    # 检查是否回头客
-    is_returning = False
-    if session_id:
-        msgs = get_conversation_messages(session_id)
-        is_returning = len(msgs) > 0
+    # 检查用户画像
+    profile = get_user_profile(session_id) if session_id else None
+    is_returning = profile is not None and profile.get("visit_count", 0) > 1
 
     if is_returning:
-        greeting = f"{period_greeting}！欢迎回来~ 😊 上次聊到哪了？有什么新问题随时问我！"
+        visits = profile.get("visit_count", 0)
+        name = profile.get("name", "")
+        name_part = f"{name}，" if name else ""
+        greeting = f"{period_greeting}！{name_part}欢迎回来~ 😊 这是你第 {visits} 次来找我啦！有什么可以帮到你？"
     else:
         tip = {
             "早上好": "上午时段包厢价格最实惠哦~",

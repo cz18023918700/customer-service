@@ -11,7 +11,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
-from models.db import init_db, save_message, get_conversation_stats, save_feedback, get_feedback_stats, get_db, export_messages_csv, get_conversation_messages
+from models.db import (
+    init_db, save_message, get_conversation_stats, save_feedback,
+    get_feedback_stats, get_db, export_messages_csv, get_conversation_messages,
+    upsert_user_profile, get_user_profile, create_ticket, update_ticket,
+    get_tickets, get_ticket_stats,
+)
 from knowledge.loader import load_knowledge_base, query_knowledge
 from engine.faq import match_faq
 from engine.chat import _sessions
@@ -183,6 +188,67 @@ def test_db_export_csv():
     assert "session_id" in csv
     lines = csv.strip().split("\n")
     assert len(lines) >= 1  # 至少有 header
+
+
+# ============ 用户画像测试 ============
+
+def test_user_profile_create():
+    sid = f"test_profile_{time.time()}"
+    upsert_user_profile(sid)
+    p = get_user_profile(sid)
+    assert p is not None
+    assert p["visit_count"] == 1
+
+
+def test_user_profile_increment():
+    sid = f"test_profile_inc_{time.time()}"
+    upsert_user_profile(sid)
+    upsert_user_profile(sid)
+    upsert_user_profile(sid)
+    p = get_user_profile(sid)
+    assert p["visit_count"] == 3
+
+
+def test_user_profile_update():
+    sid = f"test_profile_upd_{time.time()}"
+    upsert_user_profile(sid, name="王先生", membership="金卡")
+    p = get_user_profile(sid)
+    assert p["name"] == "王先生"
+    assert p["membership"] == "金卡"
+
+
+# ============ 工单测试 ============
+
+def test_ticket_create():
+    tid = create_ticket("test_t", "设备故障", "话筒没声音", "333号房话筒", "high")
+    assert tid > 0
+
+
+def test_ticket_list():
+    tickets = get_tickets()
+    assert len(tickets) > 0
+
+
+def test_ticket_resolve():
+    tid = create_ticket("test_resolve", "其他", "测试工单")
+    ok = update_ticket(tid, status="resolved")
+    assert ok
+    stats = get_ticket_stats()
+    assert stats["resolved"] > 0
+
+
+def test_ticket_filter():
+    create_ticket("test_filter", "设备故障", "测试open")
+    open_tickets = get_tickets(status="open")
+    assert len(open_tickets) > 0
+
+
+def test_db_has_new_tables():
+    with get_db() as conn:
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        names = {r["name"] for r in tables}
+        assert "user_profiles" in names
+        assert "tickets" in names
 
 
 # ============ 运行入口 ============

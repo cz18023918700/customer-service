@@ -122,6 +122,7 @@ tr:hover td { background: #fafbfc; }
         <div class="nav-item" onclick="showPanel('conversations')">💬 对话记录</div>
         <div class="nav-item" onclick="showPanel('human')">🔔 转人工记录</div>
         <div class="nav-item" onclick="showPanel('hotq')">🔥 热门问题</div>
+        <div class="nav-item" onclick="showPanel('tickets')">🔧 工单管理</div>
         <div class="nav-item" onclick="showPanel('faqmiss')">🎯 FAQ未命中</div>
         <div class="nav-item" onclick="showPanel('search')">🔍 搜索</div>
         <div class="nav-item" onclick="showPanel('knowledge')">📚 知识库管理</div>
@@ -177,6 +178,23 @@ tr:hover td { background: #fafbfc; }
             </div>
         </div>
 
+        <!-- 工单管理 -->
+        <div id="panel-tickets" class="panel">
+            <div class="stats" id="ticketStats"></div>
+            <div class="card">
+                <h3>工单列表
+                    <select id="ticketFilter" onchange="loadTickets()" style="margin-left:10px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+                        <option value="">全部</option>
+                        <option value="open">待处理</option>
+                        <option value="in_progress">处理中</option>
+                        <option value="resolved">已解决</option>
+                    </select>
+                </h3>
+                <table><thead><tr><th>ID</th><th>类型</th><th>标题</th><th>优先级</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+                <tbody id="ticketTable"></tbody></table>
+            </div>
+        </div>
+
         <!-- FAQ未命中 -->
         <div id="panel-faqmiss" class="panel">
             <div class="card">
@@ -226,6 +244,7 @@ function showPanel(name) {
     if (name === 'conversations') loadConversations();
     if (name === 'human') loadHumanTransfers();
     if (name === 'hotq') loadHotQuestions();
+    if (name === 'tickets') loadTickets();
     if (name === 'faqmiss') loadFaqMisses();
     if (name === 'knowledge') loadKBList();
 }
@@ -363,6 +382,42 @@ async function loadHotQuestions() {
         html += `<tr><td>${i+1}</td><td>${truncate(q.content, 60)}</td><td>${q.cnt}</td></tr>`;
     });
     document.getElementById('hotqTable').innerHTML = html || '<tr><td colspan="3" class="empty">暂无数据</td></tr>';
+}
+
+async function loadTickets() {
+    const [stats, list] = await Promise.all([
+        fetch('/api/tickets/stats').then(r => r.json()),
+        fetch('/api/tickets?status=' + (document.getElementById('ticketFilter')?.value || '')).then(r => r.json()),
+    ]);
+    document.getElementById('ticketStats').innerHTML = `
+        <div class="stat-card"><div class="label">总工单</div><div class="value">${stats.total}</div></div>
+        <div class="stat-card"><div class="label">待处理</div><div class="value" style="color:#e74c3c">${stats.open}</div></div>
+        <div class="stat-card"><div class="label">已解决</div><div class="value" style="color:#00b894">${stats.resolved}</div></div>
+    `;
+    const prioColor = {high:'#e74c3c',normal:'#f39c12',low:'#999'};
+    const statusLabel = {open:'待处理',in_progress:'处理中',resolved:'已解决'};
+    let html = '';
+    for (const t of list) {
+        html += `<tr>
+            <td>#${t.id}</td>
+            <td>${t.type}</td>
+            <td>${truncate(t.title, 30)}</td>
+            <td><span style="color:${prioColor[t.priority]||'#999'}">${t.priority}</span></td>
+            <td><span class="tag" style="background:${t.status==='open'?'#ffeaa7':t.status==='resolved'?'#d4f5d4':'#dfe6e9'}">${statusLabel[t.status]||t.status}</span></td>
+            <td>${fmtTime(t.created_at)}</td>
+            <td>${t.status !== 'resolved' ? `<span class="clickable" onclick="resolveTicket(${t.id})">标记解决</span>` : '✅'}</td>
+        </tr>`;
+    }
+    document.getElementById('ticketTable').innerHTML = html || '<tr><td colspan="7" class="empty">暂无工单</td></tr>';
+}
+
+async function resolveTicket(tid) {
+    await fetch('/api/tickets/' + tid, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: 'resolved'}),
+    });
+    loadTickets();
 }
 
 async function loadFaqMisses() {
