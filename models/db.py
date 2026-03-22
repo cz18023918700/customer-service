@@ -9,7 +9,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent / "customer_service.db"
+import os
+_app_dir = Path(__file__).parent.parent
+_data_dir = _app_dir / "data"
+DB_PATH = _data_dir / "customer_service.db" if _data_dir.exists() else _app_dir / "customer_service.db"
 
 
 @contextmanager
