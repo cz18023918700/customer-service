@@ -18,10 +18,12 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Query, Depends, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import config
+from engine.safety import detect_injection, INJECTION_REPLY, check_ip_rate
 from engine.chat import chat, chat_stream, get_session_history
 from knowledge.loader import load_knowledge_base
 from models.db import (
@@ -58,6 +60,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="静享时空 AI 客服", version="1.0.0")
+
+# CORS — 生产环境应改为具体域名
+_cors_origins = ["*"] if config.DEBUG else [f"https://{config.HOST}"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["*"],
+)
 
 # ============ 限流器 ============
 _rate_limits: dict[str, list[float]] = {}  # {key: [timestamps]}
@@ -247,8 +258,13 @@ MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
 
 
 @app.post("/upload")
-async def upload_image(file: UploadFile = File(...), session_id: str = Form("")):
+async def upload_image(request: Request, file: UploadFile = File(...), session_id: str = Form("")):
     """上传图片，返回图片 URL"""
+    client_ip = request.client.host if request.client else "unknown"
+    ip_ok, ip_reason = check_ip_rate(client_ip)
+    if not ip_ok:
+        return JSONResponse({"error": ip_reason}, status_code=429)
+
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         return JSONResponse({"error": "只支持 JPG/PNG/GIF/WebP 图片"}, status_code=400)
 
@@ -286,8 +302,17 @@ async def web_chat_stream(request: Request):
 
     if not user_message:
         return JSONResponse({"error": "消息不能为空"}, status_code=400)
+
+    # 安全检查：IP 限流 + session 限流 + 注入检测
+    client_ip = request.client.host if request.client else "unknown"
+    ip_ok, ip_reason = check_ip_rate(client_ip)
+    if not ip_ok:
+        return JSONResponse({"error": ip_reason}, status_code=429)
     if not check_rate_limit(session_id):
         return JSONResponse({"error": "请求太频繁，请稍后再试"}, status_code=429)
+    if detect_injection(user_message):
+        return JSONResponse({"reply": INJECTION_REPLY, "session_id": session_id,
+                             "need_human": False, "suggestions": [], "from_faq": True})
 
     save_message(session_id, "user", user_message, channel="web")
 
@@ -335,9 +360,17 @@ async def web_chat(request: Request):
     if not user_message:
         return JSONResponse({"error": "消息不能为空"}, status_code=400)
 
-    # 限流检查
+    # 安全检查
+    client_ip = request.client.host if request.client else "unknown"
+    ip_ok, ip_reason = check_ip_rate(client_ip)
+    if not ip_ok:
+        return JSONResponse({"error": ip_reason}, status_code=429)
     if not check_rate_limit(session_id):
         return JSONResponse({"error": "请求太频繁，请稍后再试"}, status_code=429)
+    if detect_injection(user_message):
+        return {"reply": INJECTION_REPLY, "session_id": session_id,
+                "need_human": False, "sources": [], "confidence": 1.0,
+                "suggestions": [], "from_faq": True, "elapsed_ms": 0}
 
     # 保存用户消息
     save_message(session_id, "user", user_message, channel="web")
