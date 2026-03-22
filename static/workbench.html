@@ -119,6 +119,17 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 <script>
 let currentSession = '';
 
+// 自动带 token
+const _wbToken = new URLSearchParams(location.search).get('token') || '';
+const _origFetch = window.fetch;
+window.fetch = function(url, opts) {
+    if (typeof url === 'string' && url.startsWith('/api/') && _wbToken) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = url + sep + 'token=' + _wbToken;
+    }
+    return _origFetch.call(this, url, opts);
+};
+
 async function loadQueue() {
     const list = await fetch('/api/human-queue').then(r => r.json());
     const badge = document.getElementById('queueBadge');
