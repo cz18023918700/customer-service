@@ -142,6 +142,29 @@ body {
 }
 .input-bar input:focus { border-color: var(--primary); background: var(--white); }
 .input-bar input::placeholder { color: #CED4DA; }
+.img-btn {
+    width: 38px; height: 38px; border-radius: 50%; border: none;
+    background: none; color: var(--text-light); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .2s; flex-shrink: 0;
+}
+.img-btn:hover { color: var(--primary); }
+
+.msg-img {
+    max-width: 220px; max-height: 220px; border-radius: 12px;
+    cursor: pointer; transition: transform .2s;
+}
+.msg-img:hover { transform: scale(1.03); }
+
+/* 图片预览遮罩 */
+.img-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,.85); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    cursor: zoom-out;
+}
+.img-overlay img { max-width: 90%; max-height: 90%; border-radius: 8px; }
+
 .send-btn {
     width: 42px; height: 42px; border-radius: 50%; border: none;
     background: linear-gradient(135deg, #6C5CE7, #A29BFE);
@@ -213,7 +236,12 @@ body {
 
 <button class="scroll-fab" id="scrollFab" onclick="toBottom()">↓</button>
 
+<input type="file" id="imgPicker" accept="image/*" style="display:none" onchange="uploadImg(this)">
+
 <div class="input-bar">
+    <button class="img-btn" onclick="document.getElementById('imgPicker').click()" title="发送图片">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    </button>
     <input type="text" id="msgInput" placeholder="请输入您的问题..." onkeydown="if(event.key==='Enter')send()">
     <button class="send-btn" id="sendBtn" onclick="send()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -314,6 +342,63 @@ async function send() {
 }
 
 function ask(text) { inp.value = text; send(); }
+
+// 图片上传
+async function uploadImg(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    if (file.size > 5 * 1024 * 1024) {
+        addMsg('bot', '图片不能超过 5MB 哦~');
+        return;
+    }
+
+    // 先显示图片消息
+    addImgMsg('user', URL.createObjectURL(file));
+
+    const form = new FormData();
+    form.append('file', file);
+    form.append('session_id', sid);
+
+    try {
+        const r = await fetch('/upload', {method: 'POST', body: form});
+        const d = await r.json();
+        if (d.error) {
+            addMsg('bot', d.error);
+            return;
+        }
+        // AI 回复"收到图片"
+        addMsg('bot', '收到你的图片了~ 📷 如果是设备故障，请描述一下具体问题，我帮你处理！');
+        setQuickReplies(['话筒没声音', '空调不制冷', '门打不开', '其他问题']);
+    } catch(e) {
+        addMsg('bot', '图片上传失败，请稍后重试~');
+    }
+}
+
+function addImgMsg(role, src) {
+    const row = document.createElement('div');
+    row.className = `msg-row ${role === 'user' ? 'user' : 'bot'}`;
+    const avatar = role === 'user' ? '😊' : '🎵';
+    const t = new Date();
+    const time = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
+    row.innerHTML = `
+        <div class="msg-avatar">${avatar}</div>
+        <div class="msg-body">
+            <img class="msg-img" src="${src}" onclick="previewImg(this.src)">
+            <div class="msg-meta"><span class="msg-time">${time}</span></div>
+        </div>`;
+    area.appendChild(row);
+    toBottom();
+}
+
+function previewImg(src) {
+    const overlay = document.createElement('div');
+    overlay.className = 'img-overlay';
+    overlay.onclick = () => overlay.remove();
+    overlay.innerHTML = `<img src="${src}">`;
+    document.body.appendChild(overlay);
+}
 
 async function fb(el, rating, mid) {
     el.parentElement.querySelectorAll('.fb-btn').forEach(b => b.classList.remove('voted'));

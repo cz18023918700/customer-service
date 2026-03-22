@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Query, Depends, HTTPException
+from fastapi import FastAPI, Request, Query, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -119,6 +119,11 @@ def verify_admin(request: Request) -> None:
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# 上传文件目录
+uploads_dir = Path(__file__).parent / "uploads"
+uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 
 @app.on_event("startup")
@@ -232,6 +237,37 @@ async def status():
             "db_size_kb": round(db_size, 1),
         },
     }
+
+
+# ============ 图片上传 ============
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+@app.post("/upload")
+async def upload_image(file: UploadFile = File(...), session_id: str = Form("")):
+    """上传图片，返回图片 URL"""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        return JSONResponse({"error": "只支持 JPG/PNG/GIF/WebP 图片"}, status_code=400)
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        return JSONResponse({"error": "图片不能超过 5MB"}, status_code=400)
+
+    # 生成唯一文件名
+    ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg"
+    filename = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.{ext}"
+    save_path = uploads_dir / filename
+    save_path.write_bytes(content)
+
+    image_url = f"/uploads/{filename}"
+
+    # 保存到对话记录
+    if session_id:
+        save_message(session_id, "user", f"[图片] {image_url}", channel="web")
+
+    return {"url": image_url, "filename": filename}
 
 
 # ============ Web 对话接口 ============
