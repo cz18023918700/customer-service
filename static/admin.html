@@ -249,6 +249,17 @@ function showPanel(name) {
     if (name === 'knowledge') loadKBList();
 }
 
+// 从 URL 读 token，劫持 fetch 自动带上
+const _adminToken = new URLSearchParams(location.search).get('token') || '';
+const _origFetch = window.fetch;
+window.fetch = function(url, opts) {
+    if (typeof url === 'string' && url.startsWith('/api/') && _adminToken) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = url + sep + 'token=' + _adminToken;
+    }
+    return _origFetch.call(this, url, opts);
+};
+
 function fmtTime(ts) {
     if (!ts) return '-';
     const d = new Date(ts * 1000);
@@ -306,7 +317,7 @@ async function loadDashboard() {
         <div class="stat-card"><div class="label">FAQ秒回率</div><div class="value">${faqRate}%</div><div class="sub">FAQ ${stats.faq_replies||0} / LLM ${stats.llm_replies||0}</div></div>
         <div class="stat-card"><div class="label">当前在线</div><div class="value">${stats.active_sessions || 0}</div><div class="sub">${stats.pending_human ? '⚠️ '+stats.pending_human+'条待处理' : '无待处理'}</div></div>
         <div class="stat-card"><div class="label">平均响应</div><div class="value">${stats.response_time ? stats.response_time.avg_ms : 0}ms</div><div class="sub">最快 ${stats.response_time?stats.response_time.min_ms:0}ms</div></div>
-        <div class="stat-card"><div class="label">导出数据</div><div class="value" style="font-size:14px"><a href="/api/export-csv" class="btn btn-primary" style="text-decoration:none;color:white">下载 CSV</a></div></div>
+        <div class="stat-card"><div class="label">导出数据</div><div class="value" style="font-size:14px"><a id="csvLink" href="/api/export-csv" class="btn btn-primary" style="text-decoration:none;color:white">下载 CSV</a></div></div>
     `;
     let html = '';
     for (const c of convs) {
@@ -480,6 +491,12 @@ async function reloadKB() {
     const resp = await fetch('/api/reload-kb', {method: 'POST'});
     const data = await resp.json();
     alert(data.message);
+}
+
+// CSV 链接带 token
+if (_adminToken) {
+    const csvEl = document.getElementById('csvLink');
+    if (csvEl) csvEl.href = '/api/export-csv?token=' + _adminToken;
 }
 
 // 初始加载
