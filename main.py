@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import config
-from engine.chat import chat, get_session_history
+from engine.chat import chat, chat_stream, get_session_history
 from knowledge.loader import load_knowledge_base
 from models.db import (
     init_db, save_message, get_conversation_stats, get_recent_conversations,
@@ -31,7 +31,8 @@ from models.db import (
     save_faq_miss, get_faq_misses, search_conversations, get_response_time_stats,
     get_peak_hours, get_active_sessions_count, get_pending_human_count,
     close_stale_conversations, get_human_queue, save_human_reply,
-    auto_tag_conversation,
+    auto_tag_conversation, upsert_user_profile, get_user_profile,
+    create_ticket, update_ticket, get_tickets, get_ticket_stats,
 )
 from wecom.callback import verify_callback, parse_message, send_text_reply, notify_human
 
@@ -272,6 +273,54 @@ async def upload_image(file: UploadFile = File(...), session_id: str = Form(""))
 
 # ============ Web 对话接口 ============
 
+@app.post("/chat/stream")
+async def web_chat_stream(request: Request):
+    """流式对话（SSE）— 逐字输出，体感快 10 倍"""
+    from starlette.responses import StreamingResponse
+
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
+    user_message = data.get("message", "").strip()
+    session_id = data.get("session_id", str(uuid.uuid4()))
+
+    if not user_message:
+        return JSONResponse({"error": "消息不能为空"}, status_code=400)
+
+    if not check_rate_limit(session_id):
+        return JSONResponse({"error": "请求太频繁，请稍后再试"}, status_code=429)
+
+    save_message(session_id, "user", user_message, channel="web")
+
+    def generate():
+        last_result = None
+        for chunk_json in chat_stream(session_id, user_message):
+            yield f"data: {chunk_json}\n\n"
+            # 解析最后一个结果用于保存
+            import json as _j
+            parsed = _j.loads(chunk_json)
+            if parsed.get("type") in ("done", "faq"):
+                last_result = parsed
+
+        # 保存 AI 回复到 DB
+        if last_result:
+            reply = last_result.get("reply", "")
+            save_message(
+                session_id, "assistant", reply,
+                confidence=last_result.get("confidence", 1.0),
+                need_human=last_result.get("need_human", False),
+                sources=",".join(last_result.get("sources", ["FAQ"])),
+                channel="web",
+                elapsed_ms=last_result.get("elapsed_ms", 0),
+            )
+            if not last_result.get("type") == "faq":
+                save_faq_miss(user_message)
+            auto_tag_conversation(session_id)
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 @app.post("/chat")
 async def web_chat(request: Request):
     """Web 端对话"""
@@ -299,9 +348,15 @@ async def web_chat(request: Request):
     if not result.get("from_faq"):
         save_faq_miss(user_message)
 
-    # 自动打标签（仅在对话有足够内容时，避免每次重复写入）
+    # 自动打标签 + 更新用户画像
     if result.get("need_human") or not result.get("from_faq"):
         auto_tag_conversation(session_id)
+    upsert_user_profile(session_id)
+
+    # 设备故障自动建工单
+    fault_keywords = ["故障", "坏了", "没声音", "不工作", "不制冷", "打不开", "漏水"]
+    if any(kw in user_message for kw in fault_keywords):
+        create_ticket(session_id, "设备故障", user_message[:50], user_message, "high")
 
     # 保存 AI 回复
     msg_id = save_message(
@@ -447,6 +502,53 @@ async def api_hot_questions(limit: int = Query(10)):
 async def api_human_transfers(limit: int = Query(20)):
     """需要人工介入的对话"""
     return get_human_transfer_list(limit)
+
+
+# ============ 用户画像 ============
+
+@app.get("/api/user/{session_id}", dependencies=[Depends(verify_admin)])
+async def api_user_profile(session_id: str):
+    """获取用户画像"""
+    profile = get_user_profile(session_id)
+    return profile or {"error": "用户不存在"}
+
+
+# ============ 工单系统 ============
+
+@app.get("/api/tickets", dependencies=[Depends(verify_admin)])
+async def api_tickets(status: str = Query(""), limit: int = Query(20)):
+    """工单列表"""
+    return get_tickets(status, limit)
+
+
+@app.get("/api/tickets/stats", dependencies=[Depends(verify_admin)])
+async def api_ticket_stats():
+    """工单统计"""
+    return get_ticket_stats()
+
+
+@app.post("/api/tickets", dependencies=[Depends(verify_admin)])
+async def api_create_ticket(request: Request):
+    """手动创建工单"""
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
+    tid = create_ticket(
+        data.get("session_id", "manual"),
+        data.get("type", "其他"),
+        data.get("title", ""),
+        data.get("description", ""),
+        data.get("priority", "normal"),
+    )
+    return {"ticket_id": tid}
+
+
+@app.put("/api/tickets/{ticket_id}", dependencies=[Depends(verify_admin)])
+async def api_update_ticket(ticket_id: int, request: Request):
+    """更新工单"""
+    body = await request.body()
+    data = json.loads(body.decode("utf-8", errors="replace"))
+    ok = update_ticket(ticket_id, data.get("status", ""), data.get("assigned_to", ""))
+    return {"success": ok}
 
 
 @app.get("/api/faq-misses", dependencies=[Depends(verify_admin)])

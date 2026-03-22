@@ -127,7 +127,7 @@ def chat(session_id: str, user_message: str) -> dict:
 
     messages.append({"role": "user", "content": user_message})
 
-    # 3. 调用 DeepSeek
+    # 3. 调用 DeepSeek（非流式，用于非 SSE 场景）
     try:
         client = get_llm_client()
         response = client.chat.completions.create(
@@ -209,6 +209,110 @@ def _check_need_human(user_msg: str, ai_reply: str, rag_score: float) -> bool:
             return True
 
     return False
+
+
+def chat_stream(session_id: str, user_message: str):
+    """流式对话 — 返回 generator，逐字输出
+
+    Yields:
+        {"type": "faq", "reply": str, ...}  FAQ 秒回（一次性）
+        {"type": "chunk", "content": str}   LLM 逐字输出
+        {"type": "done", "reply": str, ...} LLM 完成
+    """
+    import json as _json
+
+    start_time = time.time()
+
+    # FAQ 快速匹配
+    faq_result = match_faq(user_message)
+    if faq_result:
+        now = time.time()
+        history = _get_session_msgs(session_id)
+        history.append({"role": "user", "content": user_message, "ts": now})
+        history.append({"role": "assistant", "content": faq_result["reply"], "ts": now})
+        yield _json.dumps({
+            "type": "faq",
+            "reply": faq_result["reply"],
+            "suggestions": faq_result.get("suggestions", []),
+            "need_human": False,
+        }, ensure_ascii=False)
+        return
+
+    # RAG 检索
+    rag_results = query_knowledge(user_message)
+    context = "\n\n".join(
+        f"【{r['source']}】{r['content']}" for r in rag_results
+    ) if rag_results else "（未找到相关信息）"
+
+    sources = list({r["source"] for r in rag_results})
+    avg_score = sum(r["score"] for r in rag_results) / len(rag_results) if rag_results else 0.0
+
+    # 构建消息
+    system_prompt = build_system_prompt(context)
+    messages = [{"role": "system", "content": system_prompt}]
+    history = _get_session_msgs(session_id)
+    recent = history[-(config.MAX_HISTORY_TURNS * 2):]
+    for h in recent:
+        messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    # 流式调用 DeepSeek
+    full_reply = ""
+    try:
+        client = get_llm_client()
+        stream = client.chat.completions.create(
+            model=config.DEEPSEEK_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500,
+            timeout=30,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                full_reply += delta.content
+                yield _json.dumps({
+                    "type": "chunk",
+                    "content": delta.content,
+                }, ensure_ascii=False)
+
+    except Exception as e:
+        logger.error(f"LLM 流式调用失败: {e}")
+        full_reply = "不好意思，系统暂时出了点问题，请稍后再试或直接联系工作人员 🙏"
+        yield _json.dumps({"type": "chunk", "content": full_reply}, ensure_ascii=False)
+
+    # 解析 suggestions
+    reply = full_reply
+    suggestions = DEFAULT_SUGGESTIONS
+    if SUGGESTIONS_SEPARATOR in reply:
+        parts = reply.split(SUGGESTIONS_SEPARATOR, 1)
+        reply = parts[0].strip()
+        parsed = [s.strip() for s in parts[1].strip().split("\n") if s.strip()]
+        if parsed:
+            suggestions = parsed[:3]
+
+    need_human = _check_need_human(user_message, reply, avg_score)
+
+    # 保存历史
+    now = time.time()
+    history.append({"role": "user", "content": user_message, "ts": now})
+    history.append({"role": "assistant", "content": reply, "ts": now})
+    max_msgs = config.MAX_HISTORY_TURNS * 2
+    if len(history) > max_msgs + 10:
+        _sessions[session_id]["msgs"] = history[-max_msgs:]
+
+    elapsed_ms = int((time.time() - start_time) * 1000)
+
+    yield _json.dumps({
+        "type": "done",
+        "reply": reply,
+        "need_human": need_human,
+        "sources": sources,
+        "confidence": round(avg_score, 2),
+        "suggestions": suggestions,
+        "elapsed_ms": elapsed_ms,
+    }, ensure_ascii=False)
 
 
 def clear_session(session_id: str) -> None:

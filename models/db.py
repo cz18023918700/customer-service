@@ -66,6 +66,31 @@ def init_db() -> None:
                 created_at REAL NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                session_id TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
+                visit_count INTEGER DEFAULT 1,
+                favorite_room TEXT DEFAULT '',
+                membership TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                status TEXT DEFAULT 'open',
+                priority TEXT DEFAULT 'normal',
+                assigned_to TEXT DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                resolved_at REAL DEFAULT 0
+            );
+
             CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id);
             CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at);
             CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id);
@@ -488,3 +513,96 @@ def auto_tag_conversation(session_id: str) -> str:
     tags = ",".join(matched[:3]) if matched else "其他"
     tag_conversation(session_id, tags)
     return tags
+
+
+# ============ 用户画像 ============
+
+def upsert_user_profile(session_id: str, **kwargs) -> None:
+    """更新或创建用户画像"""
+    now = time.time()
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM user_profiles WHERE session_id = ?", (session_id,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE user_profiles SET visit_count = visit_count + 1, last_seen = ? WHERE session_id = ?",
+                (now, session_id)
+            )
+            for key, val in kwargs.items():
+                if key in ("name", "favorite_room", "membership", "notes") and val:
+                    conn.execute(f"UPDATE user_profiles SET {key} = ? WHERE session_id = ?", (val, session_id))
+        else:
+            conn.execute(
+                "INSERT INTO user_profiles (session_id, name, favorite_room, membership, notes, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session_id, kwargs.get("name", ""), kwargs.get("favorite_room", ""),
+                 kwargs.get("membership", ""), kwargs.get("notes", ""), now, now)
+            )
+        conn.commit()
+
+
+def get_user_profile(session_id: str) -> dict | None:
+    """获取用户画像"""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM user_profiles WHERE session_id = ?", (session_id,)).fetchone()
+        return dict(row) if row else None
+
+
+# ============ 工单系统 ============
+
+def create_ticket(session_id: str, ticket_type: str, title: str,
+                  description: str = "", priority: str = "normal") -> int:
+    """创建工单"""
+    now = time.time()
+    with get_db() as conn:
+        cursor = conn.execute(
+            "INSERT INTO tickets (session_id, type, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
+            (session_id, ticket_type, title, description, priority, now, now)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def update_ticket(ticket_id: int, status: str = "", assigned_to: str = "") -> bool:
+    """更新工单状态"""
+    now = time.time()
+    with get_db() as conn:
+        updates = ["updated_at = ?"]
+        params = [now]
+        if status:
+            updates.append("status = ?")
+            params.append(status)
+            if status == "resolved":
+                updates.append("resolved_at = ?")
+                params.append(now)
+        if assigned_to:
+            updates.append("assigned_to = ?")
+            params.append(assigned_to)
+        params.append(ticket_id)
+        cursor = conn.execute(
+            f"UPDATE tickets SET {', '.join(updates)} WHERE id = ?", params
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_tickets(status: str = "", limit: int = 20) -> list[dict]:
+    """获取工单列表"""
+    with get_db() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM tickets ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_ticket_stats() -> dict:
+    """工单统计"""
+    with get_db() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+        open_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'open'").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'resolved'").fetchone()[0]
+        return {"total": total, "open": open_count, "resolved": resolved}

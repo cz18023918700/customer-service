@@ -318,25 +318,88 @@ async function send() {
     btn.disabled = true;
     qr.innerHTML = '';
     addMsg('user', msg);
-    showTyping();
+
+    // 创建空的 bot 消息行，流式填充
+    const row = document.createElement('div');
+    row.className = 'msg-row bot';
+    const t = new Date();
+    const timeStr = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
+    row.innerHTML = `
+        <div class="msg-avatar">🎵</div>
+        <div class="msg-body">
+            <div class="msg-bubble" id="streamBubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>
+            <div class="msg-meta"><span class="msg-time">${timeStr}</span></div>
+        </div>`;
+    area.appendChild(row);
+    toBottom();
+
+    const bubble = document.getElementById('streamBubble');
+    let fullText = '';
 
     try {
-        const r = await fetch('/chat', {
+        const r = await fetch('/chat/stream', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: msg, session_id: sid}),
         });
-        const d = await r.json();
-        hideTyping();
-        addMsg('bot', d.reply, {
-            message_id: d.message_id,
-            need_human: d.need_human,
-        });
-        setQuickReplies(d.suggestions);
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const payload = line.slice(6).trim();
+                if (payload === '[DONE]') continue;
+
+                try {
+                    const d = JSON.parse(payload);
+                    if (d.type === 'faq') {
+                        // FAQ 秒回
+                        fullText = d.reply;
+                        bubble.innerHTML = fmt(fullText);
+                        toBottom();
+                        setQuickReplies(d.suggestions);
+                        if (d.need_human) {
+                            row.querySelector('.msg-meta').insertAdjacentHTML('beforeend',
+                                '<span class="human-notice">已转人工处理</span>');
+                        }
+                    } else if (d.type === 'chunk') {
+                        // 逐字输出
+                        fullText += d.content;
+                        bubble.innerHTML = fmt(fullText);
+                        toBottom();
+                    } else if (d.type === 'done') {
+                        // 完成，用最终文本替换（去掉 suggestions 分隔符）
+                        fullText = d.reply;
+                        bubble.innerHTML = fmt(fullText);
+                        setQuickReplies(d.suggestions);
+                        if (d.need_human) {
+                            row.querySelector('.msg-meta').insertAdjacentHTML('beforeend',
+                                '<span class="human-notice">已转人工处理</span>');
+                        }
+                        // 加反馈按钮
+                        row.querySelector('.msg-meta').insertAdjacentHTML('afterbegin',
+                            `<span class="msg-feedback">
+                                <button class="fb-btn" onclick="fb(this,1,0)">👍</button>
+                                <button class="fb-btn" onclick="fb(this,-1,0)">👎</button>
+                            </span>`);
+                    }
+                } catch(e) {}
+            }
+        }
     } catch(e) {
-        hideTyping();
-        addMsg('bot', '抱歉，网络出了点问题，请稍后再试~');
+        bubble.innerHTML = '抱歉，网络出了点问题，请稍后再试~';
     }
+
+    bubble.removeAttribute('id');
     btn.disabled = false;
     inp.focus();
 }
