@@ -275,8 +275,9 @@ async def upload_image(file: UploadFile = File(...), session_id: str = Form(""))
 
 @app.post("/chat/stream")
 async def web_chat_stream(request: Request):
-    """流式对话（SSE）— 逐字输出，体感快 10 倍"""
+    """流式对话（SSE）"""
     from starlette.responses import StreamingResponse
+    from engine.constants import FAULT_KEYWORDS as _FK
 
     body = await request.body()
     data = json.loads(body.decode("utf-8", errors="replace"))
@@ -285,7 +286,6 @@ async def web_chat_stream(request: Request):
 
     if not user_message:
         return JSONResponse({"error": "消息不能为空"}, status_code=400)
-
     if not check_rate_limit(session_id):
         return JSONResponse({"error": "请求太频繁，请稍后再试"}, status_code=429)
 
@@ -295,13 +295,11 @@ async def web_chat_stream(request: Request):
         last_result = None
         for chunk_json in chat_stream(session_id, user_message):
             yield f"data: {chunk_json}\n\n"
-            # 解析最后一个结果用于保存
-            import json as _j
-            parsed = _j.loads(chunk_json)
+            parsed = json.loads(chunk_json)
             if parsed.get("type") in ("done", "faq"):
                 last_result = parsed
 
-        # 保存 AI 回复到 DB
+        # 保存 + 后处理（与 /chat 保持一致）
         if last_result:
             reply = last_result.get("reply", "")
             save_message(
@@ -312,9 +310,14 @@ async def web_chat_stream(request: Request):
                 channel="web",
                 elapsed_ms=last_result.get("elapsed_ms", 0),
             )
-            if not last_result.get("type") == "faq":
+            if last_result.get("type") != "faq":
                 save_faq_miss(user_message)
-            auto_tag_conversation(session_id)
+            if last_result.get("need_human") or last_result.get("type") != "faq":
+                auto_tag_conversation(session_id)
+            upsert_user_profile(session_id)
+            # 设备故障自动建工单
+            if any(kw in user_message for kw in _FK):
+                create_ticket(session_id, "设备故障", user_message[:50], user_message, "high")
 
         yield "data: [DONE]\n\n"
 
@@ -354,8 +357,8 @@ async def web_chat(request: Request):
     upsert_user_profile(session_id)
 
     # 设备故障自动建工单
-    fault_keywords = ["故障", "坏了", "没声音", "不工作", "不制冷", "打不开", "漏水"]
-    if any(kw in user_message for kw in fault_keywords):
+    from engine.constants import FAULT_KEYWORDS
+    if any(kw in user_message for kw in FAULT_KEYWORDS):
         create_ticket(session_id, "设备故障", user_message[:50], user_message, "high")
 
     # 保存 AI 回复

@@ -386,7 +386,6 @@ def get_response_time_stats() -> dict:
 
 def get_peak_hours() -> list[dict]:
     """统计每小时的对话量（发现高峰时段）"""
-    from datetime import datetime
     with get_db() as conn:
         rows = conn.execute("""
             SELECT CAST(((created_at + 28800) % 86400) / 3600 AS INTEGER) as hour,
@@ -517,25 +516,23 @@ def auto_tag_conversation(session_id: str) -> str:
 
 # ============ 用户画像 ============
 
-def upsert_user_profile(session_id: str, **kwargs) -> None:
-    """更新或创建用户画像"""
+def upsert_user_profile(session_id: str, name: str = "", favorite_room: str = "",
+                        membership: str = "", notes: str = "") -> None:
+    """更新或创建用户画像（使用 UPSERT，原子操作）"""
     now = time.time()
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM user_profiles WHERE session_id = ?", (session_id,)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE user_profiles SET visit_count = visit_count + 1, last_seen = ? WHERE session_id = ?",
-                (now, session_id)
-            )
-            for key, val in kwargs.items():
-                if key in ("name", "favorite_room", "membership", "notes") and val:
-                    conn.execute(f"UPDATE user_profiles SET {key} = ? WHERE session_id = ?", (val, session_id))
-        else:
-            conn.execute(
-                "INSERT INTO user_profiles (session_id, name, favorite_room, membership, notes, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session_id, kwargs.get("name", ""), kwargs.get("favorite_room", ""),
-                 kwargs.get("membership", ""), kwargs.get("notes", ""), now, now)
-            )
+        conn.execute("""
+            INSERT INTO user_profiles (session_id, name, favorite_room, membership, notes, first_seen, last_seen, visit_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(session_id) DO UPDATE SET
+                visit_count = visit_count + 1,
+                last_seen = ?,
+                name = CASE WHEN ? != '' THEN ? ELSE name END,
+                favorite_room = CASE WHEN ? != '' THEN ? ELSE favorite_room END,
+                membership = CASE WHEN ? != '' THEN ? ELSE membership END,
+                notes = CASE WHEN ? != '' THEN ? ELSE notes END
+        """, (session_id, name, favorite_room, membership, notes, now, now,
+              now, name, name, favorite_room, favorite_room, membership, membership, notes, notes))
         conn.commit()
 
 
@@ -600,9 +597,12 @@ def get_tickets(status: str = "", limit: int = 20) -> list[dict]:
 
 
 def get_ticket_stats() -> dict:
-    """工单统计"""
+    """工单统计（单次查询）"""
     with get_db() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
-        open_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'open'").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'resolved'").fetchone()[0]
-        return {"total": total, "open": open_count, "resolved": resolved}
+        row = conn.execute("""
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                   SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved
+            FROM tickets
+        """).fetchone()
+        return {"total": row["total"], "open": row["open_count"] or 0, "resolved": row["resolved"] or 0}
