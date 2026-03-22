@@ -2,9 +2,12 @@ FROM python:3.12
 
 WORKDIR /app
 
-# Python 依赖
+# Python 依赖（单独一层，改代码不用重装）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# embedding 模型（如果存在则打进镜像，避免运行时下载）
+COPY model_cache/ /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/
 
 # 项目文件
 COPY . .

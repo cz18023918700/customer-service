@@ -12,3 +12,4 @@ logs/
 backups/
 data/
 uploads/
+model_cache/
