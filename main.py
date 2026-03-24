@@ -255,6 +255,37 @@ async def status():
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+KB_IMAGES_DIR = Path(__file__).parent / "static" / "images"
+KB_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/kb/upload-image", dependencies=[Depends(verify_admin)])
+async def upload_kb_image(file: UploadFile = File(...)):
+    """上传知识库图片（小程序码、门店照片等），FAQ 回复时用 [img:/static/images/xxx.png]"""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        return JSONResponse({"error": "只支持 JPG/PNG/GIF/WebP"}, status_code=400)
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        return JSONResponse({"error": "图片不能超过 5MB"}, status_code=400)
+
+    ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "png"
+    # 用原文件名（去空格），方便在 FAQ 里引用
+    safe_name = file.filename.replace(" ", "_") if file.filename else f"img_{int(time.time())}.{ext}"
+    save_path = KB_IMAGES_DIR / safe_name
+    save_path.write_bytes(content)
+
+    return {"url": f"/static/images/{safe_name}", "tag": f"[img:/static/images/{safe_name}]"}
+
+
+@app.get("/api/kb/images", dependencies=[Depends(verify_admin)])
+async def list_kb_images():
+    """列出已上传的知识库图片"""
+    images = []
+    for f in sorted(KB_IMAGES_DIR.glob("*")):
+        if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+            images.append({"name": f.name, "url": f"/static/images/{f.name}", "tag": f"[img:/static/images/{f.name}]"})
+    return images
 
 
 @app.post("/upload")

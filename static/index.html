@@ -292,6 +292,8 @@ function fmt(s) {
     d.textContent = s;
     let h = d.innerHTML;
     h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // [img:/static/images/xxx.png] → 可点击的图片
+    h = h.replace(/\[img:(\/[^\]]+)\]/g, '<img class="msg-img" src="$1" onclick="previewImg(this.src)">');
     return h;
 }
 
