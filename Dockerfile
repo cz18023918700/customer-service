@@ -15,6 +15,10 @@ COPY . .
 # 数据目录
 RUN mkdir -p /app/data
 
+# 时区设置为北京时间
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo Asia/Shanghai > /etc/timezone
+
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
 ENV CHROMA_PERSIST_DIR=/app/data/chroma_db
