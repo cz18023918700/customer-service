@@ -14,6 +14,7 @@ services:
     environment:
       - PYTHONIOENCODING=utf-8
       - CHROMA_PERSIST_DIR=/app/data/chroma_db
+      - TZ=Asia/Shanghai
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8900/health',timeout=5); assert r.status_code==200"]
       interval: 30s
