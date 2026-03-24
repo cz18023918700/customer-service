@@ -54,7 +54,8 @@ def _price_big(msg):
         f"现在是{p['period']}时段，大包厢价格：\n"
         f"· 欢唱大包厢(666/888号)：{p['big_666']} 🎤\n"
         f"· 尊享大包厢(999号)：{p['big_999']} 🎤\n\n"
-        f"会员还有折扣哦～普通9.5折/银卡9折/金卡8.5折\n"
+        f"会员还有折扣哦～普通9.5折/银卡9折/金卡8.5折\n\n"
+        f"[img:/static/images/store.jpg]\n\n"
         f"在小程序上直接下单就行~"
     )
 
@@ -124,7 +125,7 @@ def _how_to_book(msg):
         "2️⃣ 选择包厢和时间\n"
         "3️⃣ 微信支付下单\n"
         "4️⃣ 到店后在小程序点「开门」就行啦~\n\n"
-        "[img:/static/images/miniprogram.png]\n\n"
+        "[img:/static/images/miniprogram.jpg]\n\n"
         "有空房就能直接订，热门时段建议提前预约哦"
     )
 
@@ -140,7 +141,7 @@ def _first_time(msg):
         "2️⃣ 到店后点小程序里的「开门」\n"
         "3️⃣ 进去就能用啦，要喝什么到无人超市扫码买\n"
         "4️⃣ 走的时候带好东西，门自动锁\n\n"
-        "[img:/static/images/miniprogram.png]\n\n"
+        "[img:/static/images/miniprogram.jpg]\n\n"
         "全程自助，24小时都可以来~"
     )
 
